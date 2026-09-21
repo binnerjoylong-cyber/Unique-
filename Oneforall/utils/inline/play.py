@@ -40,7 +40,7 @@ def stream_markup_timer(_, vidid, chat_id, played, dur, count=0):
     percentage = (played_sec / duration_sec) * 100 if duration_sec > 0 else 0
     umm = math.floor(percentage)
 
-    # Progress bar dash style
+    # Progress bar dash style screenshot ke mutabiq
     if 0 < umm <= 10:
         bar = "•----------"
     elif 10 < umm < 20:
@@ -64,12 +64,13 @@ def stream_markup_timer(_, vidid, chat_id, played, dur, count=0):
 
     premium = is_bot_premium()
 
-    # Premium hone par Color Styles, varna Normal Buttons
-    btn_timer_kwargs = {"style": ButtonStyle.DANGER} if premium else {}
-    btn_skip_kwargs = {"style": ButtonStyle.SUCCESS} if premium else {}
-    btn_queue_kwargs = {"style": ButtonStyle.PRIMARY} if premium else {}
+    # Screenshot colors: Timer (Blue) | Pause (Red) | Queue (Green)
+    btn_timer_kwargs = {"style": ButtonStyle.PRIMARY} if premium else {}
+    btn_pause_kwargs = {"style": ButtonStyle.DANGER} if premium else {}
+    btn_queue_kwargs = {"style": ButtonStyle.SUCCESS} if premium else {}
 
     buttons = [
+        # Row 1: Blue Timer Bar
         [
             InlineKeyboardButton(
                 text=f"{played}  {bar}  {dur}",
@@ -77,15 +78,23 @@ def stream_markup_timer(_, vidid, chat_id, played, dur, count=0):
                 **btn_timer_kwargs,
             )
         ],
+        # Row 2: Replay (Normal) | II Pause (Red) | Skip (Normal)
         [
-            InlineKeyboardButton(text="↺ Replay", callback_data=f"ADMIN Replay|{chat_id}"),
-            InlineKeyboardButton(text="II Pause", callback_data=f"ADMIN Pause|{chat_id}"),
+            InlineKeyboardButton(
+                text="↺ Replay",
+                callback_data=f"ADMIN Replay|{chat_id}",
+            ),
+            InlineKeyboardButton(
+                text="II Pause",
+                callback_data=f"ADMIN Pause|{chat_id}",
+                **btn_pause_kwargs,
+            ),
             InlineKeyboardButton(
                 text="» Skip",
                 callback_data=f"ADMIN Skip|{chat_id}",
-                **btn_skip_kwargs,
             ),
         ],
+        # Row 3: Green Queue Button
         [
             InlineKeyboardButton(
                 text=f"≡ Queue - {count}",
@@ -99,17 +108,23 @@ def stream_markup_timer(_, vidid, chat_id, played, dur, count=0):
 
 def stream_markup(_, videoid, chat_id, count=0):
     premium = is_bot_premium()
-    btn_skip_kwargs = {"style": ButtonStyle.SUCCESS} if premium else {}
-    btn_queue_kwargs = {"style": ButtonStyle.PRIMARY} if premium else {}
+    btn_pause_kwargs = {"style": ButtonStyle.DANGER} if premium else {}
+    btn_queue_kwargs = {"style": ButtonStyle.SUCCESS} if premium else {}
 
     buttons = [
         [
-            InlineKeyboardButton(text="↺ Replay", callback_data=f"ADMIN Replay|{chat_id}"),
-            InlineKeyboardButton(text="II Pause", callback_data=f"ADMIN Pause|{chat_id}"),
+            InlineKeyboardButton(
+                text="↺ Replay",
+                callback_data=f"ADMIN Replay|{chat_id}",
+            ),
+            InlineKeyboardButton(
+                text="II Pause",
+                callback_data=f"ADMIN Pause|{chat_id}",
+                **btn_pause_kwargs,
+            ),
             InlineKeyboardButton(
                 text="» Skip",
                 callback_data=f"ADMIN Skip|{chat_id}",
-                **btn_skip_kwargs,
             ),
         ],
         [
@@ -245,17 +260,23 @@ def queue_markup(_, videoid, chat_id):
 
 def stream_markup2(_, chat_id):
     premium = is_bot_premium()
-    btn_skip_kwargs = {"style": ButtonStyle.SUCCESS} if premium else {}
-    btn_queue_kwargs = {"style": ButtonStyle.PRIMARY} if premium else {}
+    btn_pause_kwargs = {"style": ButtonStyle.DANGER} if premium else {}
+    btn_queue_kwargs = {"style": ButtonStyle.SUCCESS} if premium else {}
 
     buttons = [
         [
-            InlineKeyboardButton(text="↺ Replay", callback_data=f"ADMIN Replay|{chat_id}"),
-            InlineKeyboardButton(text="II Pause", callback_data=f"ADMIN Pause|{chat_id}"),
+            InlineKeyboardButton(
+                text="↺ Replay",
+                callback_data=f"ADMIN Replay|{chat_id}",
+            ),
+            InlineKeyboardButton(
+                text="II Pause",
+                callback_data=f"ADMIN Pause|{chat_id}",
+                **btn_pause_kwargs,
+            ),
             InlineKeyboardButton(
                 text="» Skip",
                 callback_data=f"ADMIN Skip|{chat_id}",
-                **btn_skip_kwargs,
             ),
         ],
         [
