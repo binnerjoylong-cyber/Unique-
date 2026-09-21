@@ -3,20 +3,6 @@ from random import randint
 from typing import Union
 
 from pyrogram.types import InlineKeyboardMarkup
-
-import config
-from Oneforall import YouTube, app
-from Oneforall.core.call import Hotty
-
-# Define a dictionary to track the last message timestamp for each user
-user_last_message_time = {}
-user_command_count = {}
-# Define the threshold for command spamming (e.g., 20 commands within 60 seconds)
-SPAM_THRESHOLD = 2
-SPAM_WINDOW_SECONDS = 5
-
-
-from pyrogram.types import InlineKeyboardMarkup
 from youtubesearchpython.__future__ import VideosSearch
 
 import config
@@ -33,6 +19,13 @@ from Oneforall.utils.inline import (
 )
 from Oneforall.utils.stream.queue import put_queue, put_queue_index
 
+# Spam control variables
+user_last_message_time = {}
+user_command_count = {}
+SPAM_THRESHOLD = 2
+SPAM_WINDOW_SECONDS = 5
+
+
 async def stream(
     _,
     mystic,
@@ -48,11 +41,10 @@ async def stream(
 ):
     if not result:
         return
-        # Define intro URL
-    intro_url = "https://files.catbox.moe/swa9ev.mp3"  #made by @sukuna_Dev
 
     if forceplay:
         await Hotty.force_stop_stream(chat_id)
+
     if streamtype == "playlist":
         msg = f"{_['play_19']}\n\n"
         count = 0
@@ -125,7 +117,8 @@ async def stream(
                     forceplay=forceplay,
                 )
                 img = await get_thumb(vidid)
-                button = stream_markup(_, vidid, chat_id)
+                q_count = max(0, len(db.get(chat_id, [])) - 1)
+                button = stream_markup(_, vidid, chat_id, count=q_count)
                 run = await app.send_photo(
                     original_chat_id,
                     photo=img,
@@ -159,6 +152,7 @@ async def stream(
                 caption=_["play_21"].format(position, link),
                 reply_markup=upl,
             )
+
     elif streamtype == "youtube":
         link = result["link"]
         vidid = result["vidid"]
@@ -220,7 +214,8 @@ async def stream(
                 forceplay=forceplay,
             )
             img = await get_thumb(vidid)
-            button = stream_markup(_, vidid, chat_id)
+            q_count = max(0, len(db.get(chat_id, [])) - 1)
+            button = stream_markup(_, vidid, chat_id, count=q_count)
             run = await app.send_photo(
                 original_chat_id,
                 photo=img,
@@ -236,6 +231,7 @@ async def stream(
 
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
+
     elif streamtype == "soundcloud":
         file_path = result["filepath"]
         title = result["title"]
@@ -286,6 +282,7 @@ async def stream(
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
     elif streamtype == "telegram":
         file_path = result["path"]
         link = result["link"]
@@ -338,12 +335,12 @@ async def stream(
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
     elif streamtype == "live":
         link = result["link"]
         vidid = result["vidid"]
         title = (result["title"]).title()
         thumbnail = result["thumb"]
-        has_spoiler=True,
         duration_min = "Live Track"
         status = True if video else None
         if await is_active_chat(chat_id):
@@ -406,6 +403,7 @@ async def stream(
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
     elif streamtype == "index":
         link = result
         title = "ɪɴᴅᴇx ᴏʀ ᴍ3ᴜ8 ʟɪɴᴋ"
@@ -459,26 +457,14 @@ async def stream(
             await mystic.delete()
 
 
-# Function to get thumbnail by video ID
-async def get_thumb(videoid):
-    try:
-        # Search for the video using video ID
-        query = f"https://www.youtube.com/watch?v={videoid}"
-        results = VideosSearch(query, limit=1)
-        for result in (await results.next())["result"]:
-            thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-        return thumbnail
-    except Exception as e:
-        return config.YOUTUBE_IMG_URL
-
-
 async def get_thumb(vidid):
     try:
-        # Search for the video using video ID
         query = f"https://www.youtube.com/watch?v={vidid}"
         results = VideosSearch(query, limit=1)
-        for result in (await results.next())["result"]:
+        res = await results.next()
+        for result in res["result"]:
             thumbnail = result["thumbnails"][0]["url"].split("?")[0]
-        return thumbnail
-    except Exception as e:
-        return config.YOUTUBE_IMG_URL
+            return thumbnail
+    except Exception:
+        pass
+    return config.YOUTUBE_IMG_URL
