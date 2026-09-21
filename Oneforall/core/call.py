@@ -376,6 +376,7 @@ class Call(PyTgCalls):
             original_chat_id = check[0]["chat_id"]
             streamtype = check[0]["streamtype"]
             videoid = check[0]["vidid"]
+            q_count = max(0, len(check) - 1)
             db[chat_id][0]["played"] = 0
             if exis := (check[0]).get("old_dur"):
                 db[chat_id][0]["dur"] = exis
@@ -427,7 +428,6 @@ class Call(PyTgCalls):
             elif "vid_" in queued:
                 mystic = await app.send_message(original_chat_id, _["call_7"])
                 file_path = None
-                file_path = None
                 try:
                     file_path, direct = await YouTube.download(
                         videoid,
@@ -466,7 +466,7 @@ class Call(PyTgCalls):
                         text=_["call_6"],
                     )
                 img = await get_thumb(videoid)
-                button = stream_markup(_, videoid, chat_id)
+                button = stream_markup(_, videoid, chat_id, count=q_count)
                 await mystic.delete()
                 run = await app.send_photo(
                     chat_id=original_chat_id,
@@ -561,7 +561,7 @@ class Call(PyTgCalls):
                     db[chat_id][0]["markup"] = "tg"
                 else:
                     img = await get_thumb(videoid)
-                    button = stream_markup(_, videoid, chat_id)
+                    button = stream_markup(_, videoid, chat_id, count=q_count)
                     run = await app.send_photo(
                         chat_id=original_chat_id,
                         photo=img,
