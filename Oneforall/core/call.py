@@ -2,10 +2,10 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 from typing import Union
+import aiohttp
 
 from ntgcalls import TelegramServerError
 from pyrogram import Client
-from pyrogram.types import InlineKeyboardMarkup
 from pytgcalls import PyTgCalls
 from pytgcalls.exceptions import AlreadyJoinedError, NoActiveGroupCall
 from pytgcalls.types import AudioQuality, MediaStream, Update, VideoQuality
@@ -36,6 +36,44 @@ from strings import get_string
 autoend = {}
 counter = {}
 loop = asyncio.get_event_loop_policy().get_event_loop()
+
+
+async def send_rich_panel(chat_id: int, text: str, rich_buttons: list, img_url: str = None):
+    blocks = []
+    if img_url:
+        blocks.append({
+            "type": "photo",
+            "photo": {"url": img_url}
+        })
+    blocks.append({
+        "type": "paragraph",
+        "text": {"text": text}
+    })
+    if rich_buttons:
+        blocks.extend(rich_buttons)
+
+    payload = {
+        "chat_id": chat_id,
+        "rich_message": {
+            "blocks": blocks
+        }
+    }
+
+    url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendRichMessage"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            data = await resp.json()
+            # Message reference object construct karna taaki edit/delete handlers break na hon
+            class MysticObj:
+                def __init__(self, d):
+                    self.id = d.get("result", {}).get("message_id", 0)
+                    self.chat = type("Chat", (), {"id": chat_id})
+                async def delete(self):
+                    try:
+                        await app.delete_messages(chat_id, self.id)
+                    except:
+                        pass
+            return MysticObj(data)
 
 
 async def _clear_(chat_id):
@@ -376,7 +414,6 @@ class Call(PyTgCalls):
             original_chat_id = check[0]["chat_id"]
             streamtype = check[0]["streamtype"]
             videoid = check[0]["vidid"]
-            q_count = max(0, len(check) - 1)
             db[chat_id][0]["played"] = 0
             if exis := (check[0]).get("old_dur"):
                 db[chat_id][0]["dur"] = exis
@@ -412,17 +449,13 @@ class Call(PyTgCalls):
                     )
                 img = await get_thumb(videoid)
                 button = stream_markup2(_, chat_id)
-                run = await app.send_photo(
-                    chat_id=original_chat_id,
-                    photo=img,
-                    caption=_["stream_1"].format(
-                        f"https://t.me/{app.username}?start=info_{videoid}",
-                        title[:23],
-                        check[0]["dur"],
-                        user,
-                    ),
-                    reply_markup=InlineKeyboardMarkup(button),
+                caption = _["stream_1"].format(
+                    f"https://t.me/{app.username}?start=info_{videoid}",
+                    title[:23],
+                    check[0]["dur"],
+                    user,
                 )
+                run = await send_rich_panel(original_chat_id, caption, button, img_url=img)
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
             elif "vid_" in queued:
@@ -466,19 +499,15 @@ class Call(PyTgCalls):
                         text=_["call_6"],
                     )
                 img = await get_thumb(videoid)
-                button = stream_markup(_, videoid, chat_id, count=q_count)
+                button = stream_markup(_, videoid, chat_id)
                 await mystic.delete()
-                run = await app.send_photo(
-                    chat_id=original_chat_id,
-                    photo=img,
-                    caption=_["stream_1"].format(
-                        f"https://t.me/{app.username}?start=info_{videoid}",
-                        title[:23],
-                        check[0]["dur"],
-                        user,
-                    ),
-                    reply_markup=InlineKeyboardMarkup(button),
+                caption = _["stream_1"].format(
+                    f"https://t.me/{app.username}?start=info_{videoid}",
+                    title[:23],
+                    check[0]["dur"],
+                    user,
                 )
+                run = await send_rich_panel(original_chat_id, caption, button, img_url=img)
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
             elif "index_" in queued:
@@ -503,12 +532,8 @@ class Call(PyTgCalls):
                         text=_["call_6"],
                     )
                 button = stream_markup2(_, chat_id)
-                run = await app.send_photo(
-                    chat_id=original_chat_id,
-                    photo=config.STREAM_IMG_URL,
-                    caption=_["stream_2"].format(user),
-                    reply_markup=InlineKeyboardMarkup(button),
-                )
+                caption = _["stream_2"].format(user)
+                run = await send_rich_panel(original_chat_id, caption, button, img_url=config.STREAM_IMG_URL)
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
             else:
@@ -533,46 +558,35 @@ class Call(PyTgCalls):
                     )
                 if videoid == "telegram":
                     button = stream_markup2(_, chat_id)
-                    run = await app.send_photo(
-                        chat_id=original_chat_id,
-                        photo=(
-                            config.TELEGRAM_AUDIO_URL
-                            if str(streamtype) == "audio"
-                            else config.TELEGRAM_VIDEO_URL
-                        ),
-                        caption=_["stream_1"].format(
-                            config.SUPPORT_CHAT, title[:23], check[0]["dur"], user
-                        ),
-                        reply_markup=InlineKeyboardMarkup(button),
+                    thumb_img = (
+                        config.TELEGRAM_AUDIO_URL
+                        if str(streamtype) == "audio"
+                        else config.TELEGRAM_VIDEO_URL
                     )
+                    caption = _["stream_1"].format(
+                        config.SUPPORT_CHAT, title[:23], check[0]["dur"], user
+                    )
+                    run = await send_rich_panel(original_chat_id, caption, button, img_url=thumb_img)
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "tg"
                 elif videoid == "soundcloud":
                     button = stream_markup2(_, chat_id)
-                    run = await app.send_photo(
-                        chat_id=original_chat_id,
-                        photo=config.SOUNCLOUD_IMG_URL,
-                        caption=_["stream_1"].format(
-                            config.SUPPORT_CHAT, title[:23], check[0]["dur"], user
-                        ),
-                        reply_markup=InlineKeyboardMarkup(button),
+                    caption = _["stream_1"].format(
+                        config.SUPPORT_CHAT, title[:23], check[0]["dur"], user
                     )
+                    run = await send_rich_panel(original_chat_id, caption, button, img_url=config.SOUNCLOUD_IMG_URL)
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "tg"
                 else:
                     img = await get_thumb(videoid)
-                    button = stream_markup(_, videoid, chat_id, count=q_count)
-                    run = await app.send_photo(
-                        chat_id=original_chat_id,
-                        photo=img,
-                        caption=_["stream_1"].format(
-                            f"https://t.me/{app.username}?start=info_{videoid}",
-                            title[:23],
-                            check[0]["dur"],
-                            user,
-                        ),
-                        reply_markup=InlineKeyboardMarkup(button),
+                    button = stream_markup(_, videoid, chat_id)
+                    caption = _["stream_1"].format(
+                        f"https://t.me/{app.username}?start=info_{videoid}",
+                        title[:23],
+                        check[0]["dur"],
+                        user,
                     )
+                    run = await send_rich_panel(original_chat_id, caption, button, img_url=img)
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "stream"
 
