@@ -10,7 +10,6 @@ from Oneforall.utils.database import get_lang
 from Oneforall.utils.formatters import seconds_to_min, time_to_seconds
 from strings import get_string
 
-# Regex: b, u, a, blockquote aur emoji
 _TAG_RE = re.compile(
     r"<(/?)(b|u|a|emoji)(?:\s+(?:href|id)=([^>]+))?>",
     re.IGNORECASE,
@@ -24,6 +23,8 @@ async def _lang(chat_id):
 
 
 def _parse_inline(segment):
+    if not segment:
+        return ""
     parts = []
     stack = []
     pos = 0
@@ -54,12 +55,11 @@ def _parse_inline(segment):
                 parts.append(types.RichTextUrl(text=inner, url=val))
             elif open_tag == "emoji":
                 try:
-                    emoji_id = int(val)
-                    # Kurigram me document_id use hota hai
-                    parts.append(types.RichTextCustomEmoji(text=inner, document_id=emoji_id))
+                    eid = int(val)
+                    parts.append(types.RichTextCustomEmoji(text=inner or "✨", document_id=eid))
                 except Exception:
                     try:
-                        parts.append(types.RichTextCustomEmoji(text=inner, custom_emoji_id=int(val)))
+                        parts.append(types.RichTextCustomEmoji(text=inner or "✨", custom_emoji_id=int(val)))
                     except Exception:
                         parts.append(inner)
 
@@ -85,8 +85,9 @@ def _html_caption_to_blocks(caption_html):
             pre_text = caption_html[last_idx:start].strip()
             if pre_text:
                 for line in pre_text.split("\n"):
-                    if line.strip():
-                        blocks.append(types.InputRichBlockParagraph(text=_parse_inline(line)))
+                    line_parsed = _parse_inline(line)
+                    if line_parsed:
+                        blocks.append(types.InputRichBlockParagraph(text=line_parsed))
 
         tag_name = match.group(1).lower()
         inner_content = match.group(2).strip()
@@ -126,8 +127,9 @@ def _html_caption_to_blocks(caption_html):
         post_text = caption_html[last_idx:].strip()
         if post_text:
             for line in post_text.split("\n"):
-                if line.strip():
-                    blocks.append(types.InputRichBlockParagraph(text=_parse_inline(line)))
+                line_parsed = _parse_inline(line)
+                if line_parsed:
+                    blocks.append(types.InputRichBlockParagraph(text=line_parsed))
 
     if not blocks:
         for line in caption_html.split("\n"):
@@ -169,26 +171,18 @@ def _progress_line(played, dur):
 
 
 _BUTTON_STYLES = [
-    enums.ButtonStyle.DEFAULT,
     enums.ButtonStyle.PRIMARY,
     enums.ButtonStyle.SUCCESS,
     enums.ButtonStyle.DANGER,
 ]
 
 
-def _random_styles():
-    styles = list(_BUTTON_STYLES)
-    styles.append(random.choice(_BUTTON_STYLES))
-    random.shuffle(styles)
-    return styles
-
-
-def _progress_row(played, dur, style):
+def _progress_row(played, dur):
     return types.InputRichBlockButtons(
         buttons=[
             types.RichMessageButton(
                 text=_progress_line(played, dur),
-                style=style,
+                style=enums.ButtonStyle.DANGER,
                 callback_data="GetTimer",
             )
         ]
@@ -200,18 +194,17 @@ def _queue_len(chat_id):
     return max(len(tracks) - 1, 0) if tracks else 0
 
 
-def _control_rows(_, chat_id, playing, styles):
-    replay_style, toggle_style, skip_style, queue_style = styles
+def _control_rows(chat_id, playing=True):
     toggle = (
         types.RichMessageButton(
             text="II Pause",
-            style=toggle_style,
+            style=enums.ButtonStyle.SUCCESS,
             callback_data=f"ADMIN Pause|{chat_id}",
         )
         if playing
         else types.RichMessageButton(
             text="▷ Resume",
-            style=toggle_style,
+            style=enums.ButtonStyle.SUCCESS,
             callback_data=f"ADMIN Resume|{chat_id}",
         )
     )
@@ -220,13 +213,13 @@ def _control_rows(_, chat_id, playing, styles):
             buttons=[
                 types.RichMessageButton(
                     text="↺ Replay",
-                    style=replay_style,
+                    style=enums.ButtonStyle.DEFAULT,
                     callback_data=f"ADMIN Replay|{chat_id}",
                 ),
                 toggle,
                 types.RichMessageButton(
                     text="» Skip",
-                    style=skip_style,
+                    style=enums.ButtonStyle.PRIMARY,
                     callback_data=f"ADMIN Skip|{chat_id}",
                 ),
             ]
@@ -235,7 +228,7 @@ def _control_rows(_, chat_id, playing, styles):
             buttons=[
                 types.RichMessageButton(
                     text=f"≡ Queue · {_queue_len(chat_id)}",
-                    style=queue_style,
+                    style=enums.ButtonStyle.PRIMARY,
                     callback_data=f"nowplaying_queue {chat_id}",
                 ),
             ]
@@ -245,7 +238,7 @@ def _control_rows(_, chat_id, playing, styles):
 
 async def _download_photo_if_url(photo):
     if not photo or not isinstance(photo, str):
-        return photo
+        return None
     if photo.startswith("http://") or photo.startswith("https://"):
         os.makedirs("cache", exist_ok=True)
         local_path = os.path.join("cache", f"thumb_{abs(hash(photo))}.jpg")
@@ -253,26 +246,31 @@ async def _download_photo_if_url(photo):
             return local_path
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(photo, timeout=10) as resp:
+                async with session.get(photo, timeout=5) as resp:
                     if resp.status == 200:
                         with open(local_path, "wb") as f:
                             f.write(await resp.read())
                         return local_path
         except Exception:
-            pass
-    return photo
+            return None
+    return photo if os.path.isfile(str(photo)) else None
 
 
 async def build_now_playing_blocks(
     _, photo, caption_html, chat_id, played=None, dur=None, playing=True
 ):
     blocks = []
+    
+    # Safe Photo Attachment
     local_photo = await _download_photo_if_url(photo)
     if local_photo and os.path.isfile(str(local_photo)):
-        blocks.append(types.InputRichBlockPhoto(photo=types.InputMediaPhoto(local_photo)))
+        try:
+            blocks.append(types.InputRichBlockPhoto(photo=types.InputMediaPhoto(local_photo)))
+        except Exception:
+            pass
 
+    # Safe Caption Blocks
     blocks += _html_caption_to_blocks(caption_html)
-    styles = _random_styles()
 
     if not dur and db.get(chat_id):
         dur = db[chat_id][0].get("dur")
@@ -280,8 +278,10 @@ async def build_now_playing_blocks(
     cur_played = played if played else "00:00"
     cur_dur = dur if dur else "00:00"
 
-    blocks.append(_progress_row(cur_played, cur_dur, styles[4]))
-    blocks += _control_rows(_, chat_id, playing, styles[:4])
+    # Progress Bar Row
+    blocks.append(_progress_row(cur_played, cur_dur))
+    # Controls (Replay, Pause/Resume, Skip, Queue)
+    blocks += _control_rows(chat_id, playing)
     return blocks
 
 
@@ -298,26 +298,21 @@ async def _try_deliver(client, target_chat_id, blocks, replace):
     if replace is not None:
         try:
             edited = await replace.edit_text(rich_message=rich)
-        except _FORBIDDEN:
-            raise
+            _consumed.add(_message_key(replace))
+            return edited or replace
         except Exception:
             try:
                 await replace.delete()
             except Exception:
                 pass
-        else:
-            _consumed.add(_message_key(replace))
-            return edited or replace
     return await client.send_rich_message(target_chat_id, rich_message=rich)
 
 
 async def _deliver(client, target_chat_id, blocks, replace=None):
     try:
         return await _try_deliver(client, target_chat_id, blocks, replace)
-    except _FORBIDDEN:
+    except Exception:
         plain = _strip_photo(blocks)
-        if len(plain) == len(blocks):
-            raise
         return await _try_deliver(client, target_chat_id, plain, replace)
 
 
@@ -326,10 +321,8 @@ async def _edit_rich(message, blocks):
         return await message.edit_text(
             rich_message=types.InputRichMessage(blocks=blocks)
         )
-    except _FORBIDDEN:
+    except Exception:
         plain = _strip_photo(blocks)
-        if len(plain) == len(blocks):
-            raise
         return await message.edit_text(
             rich_message=types.InputRichMessage(blocks=plain)
         )
@@ -422,7 +415,7 @@ async def update_now_playing_progress(mystic, chat_id, played, dur, playing=True
         return None
     photo = info[0].get("np_photo")
     caption_html = info[0].get("np_caption")
-    if not photo or not caption_html:
+    if not caption_html:
         return None
     _ = await _lang(chat_id)
     blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
@@ -436,7 +429,7 @@ async def set_now_playing_state(chat_id, playing):
     mystic = info[0].get("mystic")
     photo = info[0].get("np_photo")
     caption_html = info[0].get("np_caption")
-    if not mystic or not photo or not caption_html:
+    if not mystic or not caption_html:
         return None
     played = seconds_to_min(info[0].get("played", 0)) or None
     dur = info[0].get("dur")
