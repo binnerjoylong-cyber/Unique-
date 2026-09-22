@@ -2,7 +2,6 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 from typing import Union
-import aiohttp
 
 from ntgcalls import TelegramServerError
 from pyrogram import Client
@@ -28,7 +27,7 @@ from Oneforall.utils.database import (
 )
 from Oneforall.utils.exceptions import AssistantErr
 from Oneforall.utils.formatters import check_duration, seconds_to_min, speed_converter
-from Oneforall.utils.inline.play import stream_markup, stream_markup2
+from Oneforall.utils.inline.rich import send_now_playing_rich
 from Oneforall.utils.stream.autoclear import auto_clean
 from Oneforall.utils.thumbnails import get_thumb
 from strings import get_string
@@ -36,44 +35,6 @@ from strings import get_string
 autoend = {}
 counter = {}
 loop = asyncio.get_event_loop_policy().get_event_loop()
-
-
-async def send_rich_panel(chat_id: int, text: str, rich_buttons: list, img_url: str = None):
-    blocks = []
-    if img_url:
-        blocks.append({
-            "type": "photo",
-            "photo": {"url": img_url}
-        })
-    blocks.append({
-        "type": "paragraph",
-        "text": {"text": text}
-    })
-    if rich_buttons:
-        blocks.extend(rich_buttons)
-
-    payload = {
-        "chat_id": chat_id,
-        "rich_message": {
-            "blocks": blocks
-        }
-    }
-
-    url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendRichMessage"
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            data = await resp.json()
-            # Message reference object construct karna taaki edit/delete handlers break na hon
-            class MysticObj:
-                def __init__(self, d):
-                    self.id = d.get("result", {}).get("message_id", 0)
-                    self.chat = type("Chat", (), {"id": chat_id})
-                async def delete(self):
-                    try:
-                        await app.delete_messages(chat_id, self.id)
-                    except:
-                        pass
-            return MysticObj(data)
 
 
 async def _clear_(chat_id):
@@ -348,18 +309,10 @@ class Call(PyTgCalls):
                 video_parameters=VideoQuality.SD_480p,
             )
         else:
-            stream = (
-                MediaStream(
-                    link,
-                    audio_parameters=AudioQuality.HIGH,
-                    video_parameters=VideoQuality.SD_480p,
-                )
-                if video
-                else MediaStream(
-                    link,
-                    audio_parameters=AudioQuality.HIGH,
-                    video_flags=MediaStream.IGNORE,
-                )
+            stream = MediaStream(
+                link,
+                audio_parameters=AudioQuality.HIGH,
+                video_flags=MediaStream.IGNORE,
             )
         try:
             await assistant.join_group_call(
@@ -448,14 +401,19 @@ class Call(PyTgCalls):
                         text=_["call_6"],
                     )
                 img = await get_thumb(videoid)
-                button = stream_markup2(_, chat_id)
                 caption = _["stream_1"].format(
                     f"https://t.me/{app.username}?start=info_{videoid}",
                     title[:23],
                     check[0]["dur"],
                     user,
                 )
-                run = await send_rich_panel(original_chat_id, caption, button, img_url=img)
+                run = await send_now_playing_rich(
+                    app,
+                    chat_id,
+                    original_chat_id,
+                    img,
+                    caption,
+                )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
             elif "vid_" in queued:
@@ -469,7 +427,6 @@ class Call(PyTgCalls):
                         video=str(streamtype) == "video",
                     )
                 except Exception as e:
-                    print("YTDLP ERROR:", e)
                     return await mystic.edit_text(
                         str(e), disable_web_page_preview=True
                     )
@@ -499,7 +456,6 @@ class Call(PyTgCalls):
                         text=_["call_6"],
                     )
                 img = await get_thumb(videoid)
-                button = stream_markup(_, videoid, chat_id)
                 await mystic.delete()
                 caption = _["stream_1"].format(
                     f"https://t.me/{app.username}?start=info_{videoid}",
@@ -507,7 +463,13 @@ class Call(PyTgCalls):
                     check[0]["dur"],
                     user,
                 )
-                run = await send_rich_panel(original_chat_id, caption, button, img_url=img)
+                run = await send_now_playing_rich(
+                    app,
+                    chat_id,
+                    original_chat_id,
+                    img,
+                    caption,
+                )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
             elif "index_" in queued:
@@ -531,9 +493,14 @@ class Call(PyTgCalls):
                         original_chat_id,
                         text=_["call_6"],
                     )
-                button = stream_markup2(_, chat_id)
                 caption = _["stream_2"].format(user)
-                run = await send_rich_panel(original_chat_id, caption, button, img_url=config.STREAM_IMG_URL)
+                run = await send_now_playing_rich(
+                    app,
+                    chat_id,
+                    original_chat_id,
+                    config.STREAM_IMG_URL,
+                    caption,
+                )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
             else:
@@ -557,7 +524,6 @@ class Call(PyTgCalls):
                         text=_["call_6"],
                     )
                 if videoid == "telegram":
-                    button = stream_markup2(_, chat_id)
                     thumb_img = (
                         config.TELEGRAM_AUDIO_URL
                         if str(streamtype) == "audio"
@@ -566,27 +532,43 @@ class Call(PyTgCalls):
                     caption = _["stream_1"].format(
                         config.SUPPORT_CHAT, title[:23], check[0]["dur"], user
                     )
-                    run = await send_rich_panel(original_chat_id, caption, button, img_url=thumb_img)
+                    run = await send_now_playing_rich(
+                        app,
+                        chat_id,
+                        original_chat_id,
+                        thumb_img,
+                        caption,
+                    )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "tg"
                 elif videoid == "soundcloud":
-                    button = stream_markup2(_, chat_id)
                     caption = _["stream_1"].format(
                         config.SUPPORT_CHAT, title[:23], check[0]["dur"], user
                     )
-                    run = await send_rich_panel(original_chat_id, caption, button, img_url=config.SOUNCLOUD_IMG_URL)
+                    run = await send_now_playing_rich(
+                        app,
+                        chat_id,
+                        original_chat_id,
+                        config.SOUNCLOUD_IMG_URL,
+                        caption,
+                    )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "tg"
                 else:
                     img = await get_thumb(videoid)
-                    button = stream_markup(_, videoid, chat_id)
                     caption = _["stream_1"].format(
                         f"https://t.me/{app.username}?start=info_{videoid}",
                         title[:23],
                         check[0]["dur"],
                         user,
                     )
-                    run = await send_rich_panel(original_chat_id, caption, button, img_url=img)
+                    run = await send_now_playing_rich(
+                        app,
+                        chat_id,
+                        original_chat_id,
+                        img,
+                        caption,
+                    )
                     db[chat_id][0]["mystic"] = run
                     db[chat_id][0]["markup"] = "stream"
 
@@ -643,7 +625,7 @@ class Call(PyTgCalls):
         @self.five.on_stream_end()
         async def stream_end_handler(client, update: Update):
             if not isinstance(update, StreamAudioEnded):
-                return await client.leave_group_call(chat_id)
+                return
             await self.change_stream(client, update.chat_id)
 
 
