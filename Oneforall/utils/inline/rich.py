@@ -76,7 +76,7 @@ def _html_caption_to_blocks(caption_html):
         r"<(blockquote(?:\s+expandable)?)>(.*?)</\1>",
         re.DOTALL | re.IGNORECASE,
     )
-    
+
     last_idx = 0
     for match in bq_pattern.finditer(caption_html):
         start, end = match.span()
@@ -86,22 +86,38 @@ def _html_caption_to_blocks(caption_html):
                 for line in pre_text.split("\n"):
                     if line.strip():
                         blocks.append(types.InputRichBlockParagraph(text=_parse_inline(line)))
-        
+
         tag_name = match.group(1).lower()
         inner_content = match.group(2).strip()
         is_expandable = "expandable" in tag_name
 
-        inner_parsed = []
+        inner_items = []
         for line in inner_content.split("\n"):
-            if line.strip():
-                inner_parsed.append(types.InputRichBlockParagraph(text=_parse_inline(line)))
+            parsed = _parse_inline(line)
+            if parsed:
+                if isinstance(parsed, list):
+                    inner_items.extend(parsed)
+                else:
+                    inner_items.append(parsed)
+                inner_items.append("\n")
+
+        if inner_items and inner_items[-1] == "\n":
+            inner_items.pop()
 
         if is_expandable and hasattr(types, "InputRichBlockExpandableBlockQuotation"):
-            blocks.append(types.InputRichBlockExpandableBlockQuotation(blocks=inner_parsed))
+            try:
+                blocks.append(types.InputRichBlockExpandableBlockQuotation(text=inner_items))
+            except TypeError:
+                blocks.append(types.InputRichBlockExpandableBlockQuotation(inner_items))
         elif hasattr(types, "InputRichBlockBlockQuotation"):
-            blocks.append(types.InputRichBlockBlockQuotation(blocks=inner_parsed))
+            try:
+                blocks.append(types.InputRichBlockBlockQuotation(text=inner_items))
+            except TypeError:
+                blocks.append(types.InputRichBlockBlockQuotation(inner_items))
         else:
-            blocks.extend(inner_parsed)
+            for line in inner_content.split("\n"):
+                if line.strip():
+                    blocks.append(types.InputRichBlockParagraph(text=_parse_inline(line)))
 
         last_idx = end
 
