@@ -8,9 +8,8 @@ from Oneforall.utils.database import get_lang
 from Oneforall.utils.formatters import seconds_to_min, time_to_seconds
 from strings import get_string
 
-# Regex: b, u, a, blockquote (expandable bhi), aur custom emoji sabko extract karne ke liye
 _TAG_RE = re.compile(
-    r"<(/?)(b|u|a|blockquote(?:\s+expandable)?|emoji)(?:\s+(?:href|id)=([^>]+))?>",
+    r"<(/?)(b|u|a|emoji)(?:\s+(?:href|id)=([^>]+))?>",
     re.IGNORECASE,
 )
 _consumed = set()
@@ -32,17 +31,14 @@ def _parse_inline(segment):
         pos = m.end()
 
         closing = m.group(1)
-        raw_tag = m.group(2).lower()
+        tag = m.group(2).lower()
         attr = m.group(3)
-
-        tag = "blockquote" if "blockquote" in raw_tag else raw_tag
-        is_expandable = "expandable" in raw_tag
 
         if not closing:
             clean_attr = attr.strip("\"'") if attr else None
-            stack.append((tag, clean_attr, len(parts), is_expandable))
+            stack.append((tag, clean_attr, len(parts)))
         elif stack and stack[-1][0] == tag:
-            open_tag, val, start, exp = stack.pop()
+            open_tag, val, start = stack.pop()
             inner = parts[start:]
             del parts[start:]
             inner = inner[0] if len(inner) == 1 else inner if inner else ""
@@ -59,8 +55,6 @@ def _parse_inline(segment):
                     parts.append(types.RichTextCustomEmoji(text=inner, custom_emoji_id=emoji_id))
                 except Exception:
                     parts.append(inner)
-            elif open_tag == "blockquote":
-                parts.append(inner)
 
     if pos < len(segment):
         parts.append(segment[pos:])
@@ -137,8 +131,8 @@ def _html_caption_to_blocks(caption_html):
 
 
 def _progress_line(played, dur):
-    played_sec = time_to_seconds(played)
-    duration_sec = time_to_seconds(dur)
+    played_sec = time_to_seconds(played) if played else 0
+    duration_sec = time_to_seconds(dur) if dur else 0
     percentage = (played_sec / duration_sec) * 100 if duration_sec else 0
     umm = math.floor(percentage)
     if 0 < umm <= 10:
@@ -161,7 +155,10 @@ def _progress_line(played, dur):
         bar = "————————◉—"
     else:
         bar = "—————————◉"
-    return f"{played}  {bar}  {dur}"
+    
+    current_p = played or "00:00"
+    current_d = dur or "00:00"
+    return f"{current_p}  {bar}  {current_d}"
 
 
 _BUTTON_STYLES = [
@@ -245,8 +242,14 @@ def build_now_playing_blocks(
     blocks = [types.InputRichBlockPhoto(photo=types.InputMediaPhoto(photo))]
     blocks += _html_caption_to_blocks(caption_html)
     styles = _random_styles()
-    if played and dur:
-        blocks.append(_progress_row(played, dur, styles[4]))
+
+    if not dur and db.get(chat_id):
+        dur = db[chat_id][0].get("dur")
+
+    cur_played = played if played else "00:00"
+    cur_dur = dur if dur else "00:00"
+
+    blocks.append(_progress_row(cur_played, cur_dur, styles[4]))
     blocks += _control_rows(_, chat_id, playing, styles[:4])
     return blocks
 
@@ -320,7 +323,8 @@ async def send_now_playing_rich(
     client, chat_id, target_chat_id, photo, caption_html, replace=None
 ):
     _ = await _lang(chat_id)
-    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id)
+    dur = db[chat_id][0].get("dur") if db.get(chat_id) else None
+    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played="00:00", dur=dur)
     msg = await _deliver(client, target_chat_id, blocks, replace)
     if db.get(chat_id):
         db[chat_id][0]["np_photo"] = photo
