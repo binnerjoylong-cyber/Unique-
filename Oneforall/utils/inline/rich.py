@@ -1,13 +1,16 @@
 # Oneforall/utils/inline/rich.py
 import math
+import os
 import random
 import re
+import aiohttp
 from pyrogram import enums, errors, types
 from Oneforall.misc import db
 from Oneforall.utils.database import get_lang
 from Oneforall.utils.formatters import seconds_to_min, time_to_seconds
 from strings import get_string
 
+# Regex: b, u, a, blockquote aur emoji
 _TAG_RE = re.compile(
     r"<(/?)(b|u|a|emoji)(?:\s+(?:href|id)=([^>]+))?>",
     re.IGNORECASE,
@@ -52,9 +55,13 @@ def _parse_inline(segment):
             elif open_tag == "emoji":
                 try:
                     emoji_id = int(val)
-                    parts.append(types.RichTextCustomEmoji(text=inner, custom_emoji_id=emoji_id))
+                    # Kurigram me document_id use hota hai
+                    parts.append(types.RichTextCustomEmoji(text=inner, document_id=emoji_id))
                 except Exception:
-                    parts.append(inner)
+                    try:
+                        parts.append(types.RichTextCustomEmoji(text=inner, custom_emoji_id=int(val)))
+                    except Exception:
+                        parts.append(inner)
 
     if pos < len(segment):
         parts.append(segment[pos:])
@@ -136,26 +143,26 @@ def _progress_line(played, dur):
     percentage = (played_sec / duration_sec) * 100 if duration_sec else 0
     umm = math.floor(percentage)
     if 0 < umm <= 10:
-        bar = "◉—————————"
+        bar = "────────●"
     elif 10 < umm < 20:
-        bar = "—◉————————"
+        bar = "─●───────"
     elif 20 <= umm < 30:
-        bar = "——◉———————"
+        bar = "──●──────"
     elif 30 <= umm < 40:
-        bar = "———◉——————"
+        bar = "───●─────"
     elif 40 <= umm < 50:
-        bar = "————◉—————"
+        bar = "────●────"
     elif 50 <= umm < 60:
-        bar = "—————◉————"
+        bar = "─────●───"
     elif 60 <= umm < 70:
-        bar = "————━━◉———"
+        bar = "──────●──"
     elif 70 <= umm < 80:
-        bar = "———————◉——"
+        bar = "───────●─"
     elif 80 <= umm < 95:
-        bar = "————————◉—"
+        bar = "────────●"
     else:
-        bar = "—————————◉"
-    
+        bar = "────────●"
+
     current_p = played or "00:00"
     current_d = dur or "00:00"
     return f"{current_p}  {bar}  {current_d}"
@@ -236,10 +243,34 @@ def _control_rows(_, chat_id, playing, styles):
     ]
 
 
-def build_now_playing_blocks(
+async def _download_photo_if_url(photo):
+    if not photo or not isinstance(photo, str):
+        return photo
+    if photo.startswith("http://") or photo.startswith("https://"):
+        os.makedirs("cache", exist_ok=True)
+        local_path = os.path.join("cache", f"thumb_{abs(hash(photo))}.jpg")
+        if os.path.isfile(local_path):
+            return local_path
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(photo, timeout=10) as resp:
+                    if resp.status == 200:
+                        with open(local_path, "wb") as f:
+                            f.write(await resp.read())
+                        return local_path
+        except Exception:
+            pass
+    return photo
+
+
+async def build_now_playing_blocks(
     _, photo, caption_html, chat_id, played=None, dur=None, playing=True
 ):
-    blocks = [types.InputRichBlockPhoto(photo=types.InputMediaPhoto(photo))]
+    blocks = []
+    local_photo = await _download_photo_if_url(photo)
+    if local_photo and os.path.isfile(str(local_photo)):
+        blocks.append(types.InputRichBlockPhoto(photo=types.InputMediaPhoto(local_photo)))
+
     blocks += _html_caption_to_blocks(caption_html)
     styles = _random_styles()
 
@@ -324,7 +355,7 @@ async def send_now_playing_rich(
 ):
     _ = await _lang(chat_id)
     dur = db[chat_id][0].get("dur") if db.get(chat_id) else None
-    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played="00:00", dur=dur)
+    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played="00:00", dur=dur)
     msg = await _deliver(client, target_chat_id, blocks, replace)
     if db.get(chat_id):
         db[chat_id][0]["np_photo"] = photo
@@ -394,7 +425,7 @@ async def update_now_playing_progress(mystic, chat_id, played, dur, playing=True
     if not photo or not caption_html:
         return None
     _ = await _lang(chat_id)
-    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
     return await _edit_rich(mystic, blocks)
 
 
@@ -410,7 +441,7 @@ async def set_now_playing_state(chat_id, playing):
     played = seconds_to_min(info[0].get("played", 0)) or None
     dur = info[0].get("dur")
     _ = await _lang(chat_id)
-    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
     try:
         return await _edit_rich(mystic, blocks)
     except Exception:
