@@ -9,6 +9,7 @@ from config import (
     STREAM_IMG_URL,
     TELEGRAM_AUDIO_URL,
     TELEGRAM_VIDEO_URL,
+    SUPPORT_CHAT,
     adminlist,
     confirmer,
     votemode,
@@ -18,7 +19,6 @@ from Oneforall.core.call import Hotty
 from Oneforall.misc import SUDOERS, db
 from Oneforall.utils.database import (
     get_active_chats,
-    get_lang,
     get_upvote_count,
     is_active_chat,
     is_music_playing,
@@ -29,16 +29,14 @@ from Oneforall.utils.database import (
 )
 from Oneforall.utils.decorators.language import languageCB
 from Oneforall.utils.formatters import seconds_to_min
-from Oneforall.utils.inline import (
-    close_markup,
-    stream_markup,
-    stream_markup2,
-    stream_markup_timer,
-    stream_markup_timer2,
+from Oneforall.utils.inline import close_markup
+from Oneforall.utils.inline.rich import (
+    send_now_playing_rich,
+    set_now_playing_state,
+    update_now_playing_progress,
 )
 from Oneforall.utils.stream.autoclear import auto_clean
 from Oneforall.utils.thumbnails import get_thumb
-from strings import get_string
 
 checker = {}
 upvoters = {}
@@ -50,6 +48,7 @@ async def del_back_playlist(client, CallbackQuery, _):
     callback_data = CallbackQuery.data.strip()
     callback_request = callback_data.split(None, 1)[1]
     command, chat = callback_request.split("|")
+    counter = None
     if "_" in str(chat):
         bet = chat.split("_")
         chat = bet[0]
@@ -90,7 +89,7 @@ async def del_back_playlist(client, CallbackQuery, _):
                 exists = confirmer[chat_id][CallbackQuery.message.id]
                 current = db[chat_id][0]
             except:
-                return await CallbackQuery.edit_message_text(f"ғᴀɪʟᴇᴅ.")
+                return await CallbackQuery.edit_message_text("ғᴀɪʟᴇᴅ.")
             try:
                 if current["vidid"] != exists["vidid"]:
                     return await CallbackQuery.edit_message.text(_["admin_35"])
@@ -136,12 +135,28 @@ async def del_back_playlist(client, CallbackQuery, _):
                         return await CallbackQuery.answer(
                             _["admin_14"], show_alert=True
                         )
+
+    play_now = False
+    if command == "PlayNow":
+        tracks = db.get(chat_id) or []
+        index = next(
+            (i for i, t in enumerate(tracks) if i > 0 and t.get("qid") == counter),
+            None,
+        )
+        if index is None:
+            return await CallbackQuery.answer("Track is no longer in queue.", show_alert=True)
+        if index != 1:
+            tracks.insert(1, tracks.pop(index))
+        play_now = True
+        command = "Skip"
+
     if command == "Pause":
         if not await is_music_playing(chat_id):
             return await CallbackQuery.answer(_["admin_1"], show_alert=True)
         await CallbackQuery.answer()
         await music_off(chat_id)
         await Hotty.pause_stream(chat_id)
+        await set_now_playing_state(chat_id, playing=False)
         await CallbackQuery.message.reply_text(
             _["admin_2"].format(mention), reply_markup=close_markup(_)
         )
@@ -151,6 +166,7 @@ async def del_back_playlist(client, CallbackQuery, _):
         await CallbackQuery.answer()
         await music_on(chat_id)
         await Hotty.resume_stream(chat_id)
+        await set_now_playing_state(chat_id, playing=True)
         await CallbackQuery.message.reply_text(
             _["admin_4"].format(mention), reply_markup=close_markup(_)
         )
@@ -165,7 +181,11 @@ async def del_back_playlist(client, CallbackQuery, _):
     elif command == "Skip" or command == "Replay":
         check = db.get(chat_id)
         if command == "Skip":
-            txt = f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
+            txt = (
+                f"➻ ɴᴏᴡ ᴩʟᴀʏɪɴɢ ǫᴜᴇᴜᴇᴅ ᴛʀᴀᴄᴋ 🎄\n│ \n└ʙʏ : {mention} 🥀"
+                if play_now
+                else f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
+            )
             popped = None
             try:
                 popped = check.pop(0)
@@ -231,17 +251,19 @@ async def del_back_playlist(client, CallbackQuery, _):
                 await Hotty.skip_stream(chat_id, link, video=status, image=image)
             except:
                 return await CallbackQuery.message.reply_text(_["call_6"])
-            button = stream_markup2(_, chat_id)
             img = await get_thumb(videoid)
-            run = await CallbackQuery.message.reply_photo(
-                photo=img,
-                caption=_["stream_1"].format(
-                    f"https://t.me/{app.username}?start=info_{videoid}",
-                    title[:23],
-                    duration,
-                    user,
-                ),
-                reply_markup=InlineKeyboardMarkup(button),
+            caption = _["stream_1"].format(
+                f"https://t.me/{app.username}?start=info_{videoid}",
+                title[:23],
+                duration,
+                user,
+            )
+            run = await send_now_playing_rich(
+                app,
+                chat_id,
+                CallbackQuery.message.chat.id,
+                img,
+                caption,
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
@@ -270,17 +292,19 @@ async def del_back_playlist(client, CallbackQuery, _):
                 await Hotty.skip_stream(chat_id, file_path, video=status, image=image)
             except:
                 return await mystic.edit_text(_["call_6"])
-            button = stream_markup(_, videoid, chat_id)
             img = await get_thumb(videoid)
-            run = await CallbackQuery.message.reply_photo(
-                photo=img,
-                caption=_["stream_1"].format(
-                    f"https://t.me/{app.username}?start=info_{videoid}",
-                    title[:23],
-                    duration,
-                    user,
-                ),
-                reply_markup=InlineKeyboardMarkup(button),
+            caption = _["stream_1"].format(
+                f"https://t.me/{app.username}?start=info_{videoid}",
+                title[:23],
+                duration,
+                user,
+            )
+            run = await send_now_playing_rich(
+                app,
+                chat_id,
+                CallbackQuery.message.chat.id,
+                img,
+                caption,
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
@@ -291,11 +315,13 @@ async def del_back_playlist(client, CallbackQuery, _):
                 await Hotty.skip_stream(chat_id, videoid, video=status)
             except:
                 return await CallbackQuery.message.reply_text(_["call_6"])
-            button = stream_markup2(_, chat_id)
-            run = await CallbackQuery.message.reply_photo(
-                photo=STREAM_IMG_URL,
-                caption=_["stream_2"].format(user),
-                reply_markup=InlineKeyboardMarkup(button),
+            caption = _["stream_2"].format(user)
+            run = await send_now_playing_rich(
+                app,
+                chat_id,
+                CallbackQuery.message.chat.id,
+                STREAM_IMG_URL,
+                caption,
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
@@ -315,47 +341,50 @@ async def del_back_playlist(client, CallbackQuery, _):
             except:
                 return await CallbackQuery.message.reply_text(_["call_6"])
             if videoid == "telegram":
-                button = stream_markup2(_, chat_id)
-                run = await CallbackQuery.message.reply_photo(
-                    photo=(
-                        TELEGRAM_AUDIO_URL
-                        if str(streamtype) == "audio"
-                        else TELEGRAM_VIDEO_URL
-                    ),
-                    caption=_["stream_1"].format(
-                        config.SUPPORT_CHAT, title[:23], duration, user
-                    ),
-                    reply_markup=InlineKeyboardMarkup(button),
+                thumb = (
+                    TELEGRAM_AUDIO_URL
+                    if str(streamtype) == "audio"
+                    else TELEGRAM_VIDEO_URL
+                )
+                caption = _["stream_1"].format(
+                    SUPPORT_CHAT, title[:23], duration, user
+                )
+                run = await send_now_playing_rich(
+                    app,
+                    chat_id,
+                    CallbackQuery.message.chat.id,
+                    thumb,
+                    caption,
                 )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
             elif videoid == "soundcloud":
-                button = stream_markup2(_, chat_id)
-                run = await CallbackQuery.message.reply_photo(
-                    photo=(
-                        SOUNCLOUD_IMG_URL
-                        if str(streamtype) == "audio"
-                        else TELEGRAM_VIDEO_URL
-                    ),
-                    caption=_["stream_1"].format(
-                        config.SUPPORT_CHAT, title[:23], duration, user
-                    ),
-                    reply_markup=InlineKeyboardMarkup(button),
+                caption = _["stream_1"].format(
+                    SUPPORT_CHAT, title[:23], duration, user
+                )
+                run = await send_now_playing_rich(
+                    app,
+                    chat_id,
+                    CallbackQuery.message.chat.id,
+                    SOUNCLOUD_IMG_URL,
+                    caption,
                 )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "tg"
             else:
-                button = stream_markup(_, videoid, chat_id)
                 img = await get_thumb(videoid)
-                run = await CallbackQuery.message.reply_photo(
-                    photo=img,
-                    caption=_["stream_1"].format(
-                        f"https://t.me/{app.username}?start=info_{videoid}",
-                        title[:23],
-                        duration,
-                        user,
-                    ),
-                    reply_markup=InlineKeyboardMarkup(button),
+                caption = _["stream_1"].format(
+                    f"https://t.me/{app.username}?start=info_{videoid}",
+                    title[:23],
+                    duration,
+                    user,
+                )
+                run = await send_now_playing_rich(
+                    app,
+                    chat_id,
+                    CallbackQuery.message.chat.id,
+                    img,
+                    caption,
                 )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
@@ -363,7 +392,7 @@ async def del_back_playlist(client, CallbackQuery, _):
 
 
 async def markup_timer():
-    while not await asyncio.sleep(1):
+    while not await asyncio.sleep(7):
         active_chats = await get_active_chats()
         for chat_id in active_chats:
             try:
@@ -376,7 +405,7 @@ async def markup_timer():
                 if duration_seconds == 0:
                     continue
                 try:
-                    mystic = playing[0]["markup"]
+                    mystic = playing[0]["mystic"]
                 except:
                     continue
                 try:
@@ -386,66 +415,27 @@ async def markup_timer():
                 except:
                     pass
                 try:
-                    language = await get_lang(chat_id)
-                    _ = get_string(language)
-                except:
-                    _ = get_string("en")
-                try:
-                    mystic = playing[0]["mystic"]
-                    markup = playing[0]["markup"]
-                except:
-                    continue
-                try:
-                    check = wrong[chat_id][mystic.id]
-                    if check is False:
-                        continue
-                except:
-                    pass
-                try:
-                    language = await get_lang(chat_id)
-                    _ = get_string(language)
-                except:
-                    _ = get_string("en")
-                try:
-                    mystic = playing[0]["mystic"]
-                    markup = playing[0]["markup"]
-                except:
-                    continue
-                try:
-                    check = wrong[chat_id][mystic.id]
-                    if check is False:
-                        continue
-                except:
-                    pass
-                try:
-                    language = await get_lang(chat_id)
-                    _ = get_string(language)
-                except:
-                    _ = get_string("en")
-                try:
-                    buttons = (
-                        stream_markup_timer(
-                            _,
-                            playing[0]["vidid"],
-                            chat_id,
-                            seconds_to_min(playing[0]["played"]),
-                            playing[0]["dur"],
-                        )
-                        if markup == "stream"
-                        else stream_markup_timer2(
-                            _,
-                            chat_id,
-                            seconds_to_min(playing[0]["played"]),
-                            playing[0]["dur"],
-                        )
-                    )
-                    await mystic.edit_reply_markup(
-                        reply_markup=InlineKeyboardMarkup(buttons)
+                    await update_now_playing_progress(
+                        mystic,
+                        chat_id,
+                        seconds_to_min(playing[0]["played"]),
+                        playing[0]["dur"],
                     )
                 except:
                     continue
             except:
                 continue
+
+
+@app.on_callback_query(filters.regex("nowplaying_queue") & ~BANNED_USERS)
+async def nowplaying_queue_alert(client, CallbackQuery):
+    chat_id = int(CallbackQuery.data.split(None, 1)[1])
+    tracks = db.get(chat_id) or []
+    upcoming = tracks[1:]
+    if not upcoming:
+        return await CallbackQuery.answer("Queue is empty.", show_alert=True)
+    lines = [f"{i}. {t['title'][:40]}" for i, t in enumerate(upcoming[:10], start=1)]
+    await CallbackQuery.answer("\n".join(lines), show_alert=True)
 
 
 asyncio.create_task(markup_timer())
