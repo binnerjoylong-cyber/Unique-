@@ -1,8 +1,9 @@
 import random
 import string
+import aiohttp
 
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InputMediaPhoto, Message
+from pyrogram.types import Message
 from pytgcalls.exceptions import NoActiveGroupCall
 
 import config
@@ -23,6 +24,33 @@ from Oneforall.utils.inline import (
 )
 from Oneforall.utils.logger import play_logs
 from Oneforall.utils.stream.stream import stream
+
+
+async def send_rich_block(chat_id: int, text: str, rich_buttons: list = None, img_url: str = None):
+    blocks = []
+    if img_url:
+        blocks.append({
+            "type": "photo",
+            "photo": {"url": img_url}
+        })
+    blocks.append({
+        "type": "paragraph",
+        "text": {"text": text}
+    })
+    if rich_buttons:
+        blocks.extend(rich_buttons)
+
+    payload = {
+        "chat_id": chat_id,
+        "rich_message": {
+            "blocks": blocks
+        }
+    }
+
+    url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendRichMessage"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            return await resp.json()
 
 
 @app.on_message(
@@ -82,7 +110,7 @@ async def play_commnd(
             )
         file_path = await Telegram.get_filepath(audio=audio_telegram)
         if not file_path:
-           return await mystic.edit_text("Download failed or stream URL not found.")
+            return await mystic.edit_text("Download failed or stream URL not found.")
         if await Telegram.download(_, message, mystic, file_path):
             message_link = await Telegram.get_link(message)
             file_name = await Telegram.get_filename(audio_telegram, audio=True)
@@ -128,7 +156,7 @@ async def play_commnd(
             return await mystic.edit_text(_["play_8"])
         file_path = await Telegram.get_filepath(video=video_telegram)
         if not file_path:
-           return await mystic.edit_text("Download failed or stream URL not found.")
+            return await mystic.edit_text("Download failed or stream URL not found.")
         if await Telegram.download(_, message, mystic, file_path):
             message_link = await Telegram.get_link(message)
             file_name = await Telegram.get_filename(video_telegram)
@@ -323,10 +351,8 @@ async def play_commnd(
     else:
         if len(message.command) < 2:
             buttons = botplaylist_markup(_)
-            return await mystic.edit_text(
-                _["play_18"],
-                reply_markup=InlineKeyboardMarkup(buttons),
-            )
+            await mystic.delete()
+            return await send_rich_block(message.chat.id, _["play_18"], buttons)
         slider = True
         query = message.text.split(None, 1)[1]
         if "-v" in query:
@@ -353,10 +379,8 @@ async def play_commnd(
                     "c" if channel else "g",
                     "f" if fplay else "d",
                 )
-                return await mystic.edit_text(
-                    _["play_13"],
-                    reply_markup=InlineKeyboardMarkup(buttons),
-                )
+                await mystic.delete()
+                return await send_rich_block(message.chat.id, _["play_13"], buttons)
         try:
             await stream(
                 _,
@@ -392,11 +416,7 @@ async def play_commnd(
                 "f" if fplay else "d",
             )
             await mystic.delete()
-            await message.reply_photo(
-                photo=img,
-                caption=cap,
-                reply_markup=InlineKeyboardMarkup(buttons),
-            )
+            await send_rich_block(message.chat.id, cap, buttons, img_url=img)
             return await play_logs(message, streamtype=f"Playlist : {plist_type}")
         else:
             if slider:
@@ -410,15 +430,9 @@ async def play_commnd(
                     "f" if fplay else "d",
                 )
                 await mystic.delete()
-                await message.reply_photo(
-                    photo=details["thumb"],
-                    caption=_["play_10"].format(
-                        details["title"].title(),
-                        details["duration_min"],
-                    ),
-                    reply_markup=InlineKeyboardMarkup(buttons),
-                )
-                return await play_logs(message, streamtype=f"Searched on Youtube")
+                caption = _["play_10"].format(details["title"].title(), details["duration_min"])
+                await send_rich_block(message.chat.id, caption, buttons, img_url=details["thumb"])
+                return await play_logs(message, streamtype="Searched on Youtube")
             else:
                 buttons = track_markup(
                     _,
@@ -428,12 +442,8 @@ async def play_commnd(
                     "f" if fplay else "d",
                 )
                 await mystic.delete()
-                await message.reply_photo(
-                    photo=img,
-                    caption=cap,
-                    reply_markup=InlineKeyboardMarkup(buttons),
-                )
-                return await play_logs(message, streamtype=f"URL Searched Inline")
+                await send_rich_block(message.chat.id, cap, buttons, img_url=img)
+                return await play_logs(message, streamtype="URL Searched Inline")
 
 
 @app.on_callback_query(filters.regex("MusicStream") & ~BANNED_USERS)
@@ -479,10 +489,8 @@ async def play_music(client, CallbackQuery, _):
             "c" if cplay == "c" else "g",
             "f" if fplay else "d",
         )
-        return await mystic.edit_text(
-            _["play_13"],
-            reply_markup=InlineKeyboardMarkup(buttons),
-        )
+        await mystic.delete()
+        return await send_rich_block(CallbackQuery.message.chat.id, _["play_13"], buttons)
     video = True if mode == "v" else None
     ffplay = True if fplay == "f" else None
     try:
@@ -509,7 +517,11 @@ async def play_music(client, CallbackQuery, _):
 async def piyush_check(client, CallbackQuery):
     try:
         await CallbackQuery.answer(
-            "» ʀᴇᴠᴇʀᴛ ʙᴀᴄᴋ ᴛᴏ ᴜsᴇʀ ᴀᴄᴄᴏᴜɴᴛ :\n\nᴏᴘᴇɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ sᴇᴛᴛɪɴɢs.\n-> ᴀᴅᴍɪɴɪsᴛʀᴀᴛᴏʀs\n-> ᴄʟɪᴄᴋ ᴏɴ ʏᴏᴜʀ ɴᴀᴍᴇ\n-> ᴜɴᴄʜᴇᴄᴋ ᴀɴᴏɴʏᴍᴏᴜs ᴀᴅᴍɪɴ ᴘᴇʀᴍɪssɪᴏɴs.",
+            "» ʀᴇᴠᴇʀᴛ ʙᴀᴄᴋ ᴛᴏ ᴜsᴇʀ ᴀᴄᴄᴏᴜɴᴛ :\n\n"
+            "ᴏᴘᴇɴ ʏᴏᴜʀ ɢʀᴏᴜᴘ sᴇᴛᴛɪɴɢs.\n"
+            "-> ᴀᴅᴍɪɴɪsᴛʀᴀᴛᴏʀs\n"
+            "-> ᴄʟɪᴄᴋ ᴏɴ ʏᴏᴜʀ ɴᴀᴍᴇ\n"
+            "-> ᴜɴᴄʜᴇᴄᴋ ᴀɴᴏɴʏᴍᴏᴜs ᴀᴅᴍɪɴ ᴘᴇʀᴍɪssɪᴏɴs.",
             show_alert=True,
         )
     except:
@@ -624,44 +636,24 @@ async def slider_queries(client, CallbackQuery, _):
     what = str(what)
     rtype = int(rtype)
     if what == "F":
-        if rtype == 9:
-            query_type = 0
-        else:
-            query_type = int(rtype + 1)
+        query_type = 0 if rtype == 9 else int(rtype + 1)
         try:
             await CallbackQuery.answer(_["playcb_2"])
         except:
             pass
         title, duration_min, thumbnail, vidid = await YouTube.slider(query, query_type)
         buttons = slider_markup(_, vidid, user_id, query, query_type, cplay, fplay)
-        med = InputMediaPhoto(
-            media=thumbnail,
-            caption=_["play_10"].format(
-                title.title(),
-                duration_min,
-            ),
-        )
-        return await CallbackQuery.edit_message_media(
-            media=med, reply_markup=InlineKeyboardMarkup(buttons)
-        )
+        caption = _["play_10"].format(title.title(), duration_min)
+        await CallbackQuery.message.delete()
+        return await send_rich_block(CallbackQuery.message.chat.id, caption, buttons, img_url=thumbnail)
     if what == "B":
-        if rtype == 0:
-            query_type = 9
-        else:
-            query_type = int(rtype - 1)
+        query_type = 9 if rtype == 0 else int(rtype - 1)
         try:
             await CallbackQuery.answer(_["playcb_2"])
         except:
             pass
         title, duration_min, thumbnail, vidid = await YouTube.slider(query, query_type)
         buttons = slider_markup(_, vidid, user_id, query, query_type, cplay, fplay)
-        med = InputMediaPhoto(
-            media=thumbnail,
-            caption=_["play_10"].format(
-                title.title(),
-                duration_min,
-            ),
-        )
-        return await CallbackQuery.edit_message_media(
-            media=med, reply_markup=InlineKeyboardMarkup(buttons)
-        )
+        caption = _["play_10"].format(title.title(), duration_min)
+        await CallbackQuery.message.delete()
+        return await send_rich_block(CallbackQuery.message.chat.id, caption, buttons, img_url=thumbnail)
