@@ -17,7 +17,7 @@ def rich_button(text, callback_data=None, url=None, style="default", custom_emoj
     return btn
 
 
-def track_markup(_, videoid, user_id, channel, fplay):
+def track_markup(_, videoid, user_id, channel, fplay, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -37,7 +37,7 @@ def track_markup(_, videoid, user_id, channel, fplay):
     ]
 
 
-def stream_markup_timer(_, vidid, chat_id, played, dur):
+def stream_markup_timer(_, vidid, chat_id, played, dur, *args, **kwargs):
     played_sec = time_to_seconds(played)
     duration_sec = time_to_seconds(dur)
     percentage = (played_sec / duration_sec) * 100 if duration_sec > 0 else 0
@@ -97,7 +97,7 @@ def stream_markup_timer(_, vidid, chat_id, played, dur):
     ]
 
 
-def stream_markup(_, videoid, chat_id):
+def stream_markup(_, videoid, chat_id, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -120,7 +120,7 @@ def stream_markup(_, videoid, chat_id):
     ]
 
 
-def playlist_markup(_, videoid, user_id, ptype, channel, fplay):
+def playlist_markup(_, videoid, user_id, ptype, channel, fplay, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -140,7 +140,7 @@ def playlist_markup(_, videoid, user_id, ptype, channel, fplay):
     ]
 
 
-def livestream_markup(_, videoid, user_id, mode, channel, fplay):
+def livestream_markup(_, videoid, user_id, mode, channel, fplay, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -159,7 +159,7 @@ def livestream_markup(_, videoid, user_id, mode, channel, fplay):
     ]
 
 
-def slider_markup(_, videoid, user_id, query, query_type, channel, fplay):
+def slider_markup(_, videoid, user_id, query, query_type, channel, fplay, *args, **kwargs):
     query = f"{query[:20]}"
     return [
         {
@@ -185,7 +185,7 @@ def slider_markup(_, videoid, user_id, query, query_type, channel, fplay):
 ## Telegram Markup
 
 
-def telegram_markup(_, chat_id):
+def telegram_markup(_, chat_id, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -201,7 +201,7 @@ def telegram_markup(_, chat_id):
 ## Queue Markup
 
 
-def queue_markup(_, videoid, chat_id):
+def queue_markup(_, videoid, chat_id, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -237,7 +237,7 @@ def queue_markup(_, videoid, chat_id):
     ]
 
 
-def stream_markup2(_, chat_id):
+def stream_markup2(_, chat_id, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -267,7 +267,7 @@ def stream_markup2(_, chat_id):
     ]
 
 
-def stream_markup_timer2(_, chat_id, played, dur):
+def stream_markup_timer2(_, chat_id, played, dur, *args, **kwargs):
     played_sec = time_to_seconds(played)
     duration_sec = time_to_seconds(dur)
     percentage = (played_sec / duration_sec) * 100 if duration_sec > 0 else 0
@@ -323,7 +323,7 @@ def stream_markup_timer2(_, chat_id, played, dur):
     ]
 
 
-def panel_markup_1(_, videoid, chat_id):
+def panel_markup_1(_, videoid, chat_id, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -359,7 +359,7 @@ def panel_markup_1(_, videoid, chat_id):
     ]
 
 
-def panel_markup_2(_, videoid, chat_id):
+def panel_markup_2(_, videoid, chat_id, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -395,7 +395,7 @@ def panel_markup_2(_, videoid, chat_id):
     ]
 
 
-def panel_markup_3(_, videoid, chat_id):
+def panel_markup_3(_, videoid, chat_id, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -424,7 +424,7 @@ def panel_markup_3(_, videoid, chat_id):
     ]
 
 
-def panel_markup_4(_, vidid, chat_id, played, dur):
+def panel_markup_4(_, vidid, chat_id, played, dur, *args, **kwargs):
     played_sec = time_to_seconds(played)
     duration_sec = time_to_seconds(dur)
     percentage = (played_sec / duration_sec) * 100 if duration_sec > 0 else 0
@@ -481,7 +481,7 @@ def panel_markup_4(_, vidid, chat_id, played, dur):
     ]
 
 
-def panel_markup_5(_, videoid, chat_id):
+def panel_markup_5(_, videoid, chat_id, *args, **kwargs):
     return [
         {
             "type": "buttons",
@@ -518,7 +518,7 @@ def panel_markup_5(_, videoid, chat_id):
     ]
 
 
-def panel_markup_clone(_, vidid, chat_id):
+def panel_markup_clone(_, vidid, chat_id, *args, **kwargs):
     return [
         {
             "type": "buttons",
