@@ -92,7 +92,7 @@ def _progress_line(played, dur):
     elif 50 <= umm < 60:
         bar = "—————◉————"
     elif 60 <= umm < 70:
-        bar = "——————◉———"
+        bar = "————━━◉———"
     elif 70 <= umm < 80:
         bar = "———————◉——"
     elif 80 <= umm < 95:
@@ -225,6 +225,35 @@ async def _deliver(client, target_chat_id, blocks, replace=None):
         return await _try_deliver(client, target_chat_id, plain, replace)
 
 
+async def _edit_rich(message, blocks):
+    try:
+        return await message.edit_text(
+            rich_message=types.InputRichMessage(blocks=blocks)
+        )
+    except _FORBIDDEN:
+        plain = _strip_photo(blocks)
+        if len(plain) == len(blocks):
+            raise
+        return await message.edit_text(
+            rich_message=types.InputRichMessage(blocks=plain)
+        )
+
+
+def caption_blocks(caption_html):
+    return _html_caption_to_blocks(caption_html)
+
+
+async def edit_rich(message, blocks):
+    return await _edit_rich(message, blocks)
+
+
+async def deliver_rich(client, target_chat_id, blocks, replace=None):
+    result = await _deliver(client, target_chat_id, blocks, replace)
+    if replace is not None:
+        _consumed.discard(_message_key(replace))
+    return result
+
+
 async def send_now_playing_rich(
     client, chat_id, target_chat_id, photo, caption_html, replace=None
 ):
@@ -288,3 +317,35 @@ async def release_mystic(mystic):
         await mystic.delete()
     except Exception:
         pass
+
+
+async def update_now_playing_progress(mystic, chat_id, played, dur, playing=True):
+    info = db.get(chat_id)
+    if not info:
+        return None
+    photo = info[0].get("np_photo")
+    caption_html = info[0].get("np_caption")
+    if not photo or not caption_html:
+        return None
+    _ = await _lang(chat_id)
+    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    return await _edit_rich(mystic, blocks)
+
+
+async def set_now_playing_state(chat_id, playing):
+    info = db.get(chat_id)
+    if not info:
+        return None
+    mystic = info[0].get("mystic")
+    photo = info[0].get("np_photo")
+    caption_html = info[0].get("np_caption")
+    if not mystic or not photo or not caption_html:
+        return None
+    played = seconds_to_min(info[0].get("played", 0)) or None
+    dur = info[0].get("dur")
+    _ = await _lang(chat_id)
+    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    try:
+        return await _edit_rich(mystic, blocks)
+    except Exception:
+        return None
