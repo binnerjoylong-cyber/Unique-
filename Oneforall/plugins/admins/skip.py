@@ -1,5 +1,5 @@
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, Message
+from pyrogram.types import Message
 
 import config
 from config import BANNED_USERS
@@ -8,7 +8,8 @@ from Oneforall.core.call import Hotty
 from Oneforall.misc import db
 from Oneforall.utils.database import get_loop
 from Oneforall.utils.decorators import AdminRightsCheck
-from Oneforall.utils.inline import close_markup, stream_markup, stream_markup2
+from Oneforall.utils.inline import close_markup
+from Oneforall.utils.inline.rich import send_now_playing_rich
 from Oneforall.utils.stream.autoclear import auto_clean
 from Oneforall.utils.thumbnails import get_thumb
 
@@ -89,6 +90,7 @@ async def skip(cli, message: Message, _, chat_id):
                 return await Hotty.stop_stream(chat_id)
             except:
                 return
+
     queued = check[0]["file"]
     title = (check[0]["title"]).title()
     user = check[0]["by"]
@@ -102,6 +104,7 @@ async def skip(cli, message: Message, _, chat_id):
         db[chat_id][0]["seconds"] = check[0]["old_second"]
         db[chat_id][0]["speed_path"] = None
         db[chat_id][0]["speed"] = 1.0
+
     if "live_" in queued:
         n, link = await YouTube.video(videoid, True)
         if n == 0:
@@ -114,20 +117,22 @@ async def skip(cli, message: Message, _, chat_id):
             await Hotty.skip_stream(chat_id, link, video=status, image=image)
         except:
             return await message.reply_text(_["call_6"])
-        button = stream_markup2(_, chat_id)
         img = await get_thumb(videoid)
-        run = await message.reply_photo(
-            photo=img,
-            caption=_["stream_1"].format(
+        run = await send_now_playing_rich(
+            app,
+            chat_id,
+            message.chat.id,
+            img,
+            _["stream_1"].format(
                 f"https://t.me/{app.username}?start=info_{videoid}",
                 title[:23],
                 check[0]["dur"],
                 user,
             ),
-            reply_markup=InlineKeyboardMarkup(button),
         )
         db[chat_id][0]["mystic"] = run
         db[chat_id][0]["markup"] = "tg"
+
     elif "vid_" in queued:
         mystic = await message.reply_text(_["call_7"], disable_web_page_preview=True)
         file_path = None
@@ -152,39 +157,43 @@ async def skip(cli, message: Message, _, chat_id):
                 chat_id,
                 file_path,
                 video=status,
-                image=image
+                image=image,
             )
-
         except:
             return await mystic.edit_text(_["call_6"])
-        button = stream_markup(_, videoid, chat_id)
+
         img = await get_thumb(videoid)
-        run = await message.reply_photo(
-            photo=img,
-            caption=_["stream_1"].format(
+        run = await send_now_playing_rich(
+            app,
+            chat_id,
+            message.chat.id,
+            img,
+            _["stream_1"].format(
                 f"https://t.me/{app.username}?start=info_{videoid}",
                 title[:23],
                 check[0]["dur"],
                 user,
             ),
-            reply_markup=InlineKeyboardMarkup(button),
+            replace=mystic,
         )
         db[chat_id][0]["mystic"] = run
         db[chat_id][0]["markup"] = "stream"
-        await mystic.delete()
+
     elif "index_" in queued:
         try:
             await Hotty.skip_stream(chat_id, videoid, video=status)
         except:
             return await message.reply_text(_["call_6"])
-        button = stream_markup2(_, chat_id)
-        run = await message.reply_photo(
-            photo=config.STREAM_IMG_URL,
-            caption=_["stream_2"].format(user),
-            reply_markup=InlineKeyboardMarkup(button),
+        run = await send_now_playing_rich(
+            app,
+            chat_id,
+            message.chat.id,
+            config.STREAM_IMG_URL,
+            _["stream_2"].format(user),
         )
         db[chat_id][0]["mystic"] = run
         db[chat_id][0]["markup"] = "tg"
+
     else:
         if videoid == "telegram":
             image = None
@@ -199,48 +208,51 @@ async def skip(cli, message: Message, _, chat_id):
             await Hotty.skip_stream(chat_id, queued, video=status, image=image)
         except:
             return await message.reply_text(_["call_6"])
+
         if videoid == "telegram":
-            button = stream_markup2(_, chat_id)
-            run = await message.reply_photo(
-                photo=(
-                    config.TELEGRAM_AUDIO_URL
-                    if str(streamtype) == "audio"
-                    else config.TELEGRAM_VIDEO_URL
-                ),
-                caption=_["stream_1"].format(
+            thumb_url = (
+                config.TELEGRAM_AUDIO_URL
+                if str(streamtype) == "audio"
+                else config.TELEGRAM_VIDEO_URL
+            )
+            run = await send_now_playing_rich(
+                app,
+                chat_id,
+                message.chat.id,
+                thumb_url,
+                _["stream_1"].format(
                     config.SUPPORT_CHAT, title[:23], check[0]["dur"], user
                 ),
-                reply_markup=InlineKeyboardMarkup(button),
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
         elif videoid == "soundcloud":
-            button = stream_markup(_, chat_id)
-            run = await message.reply_photo(
-                photo=(
-                    config.SOUNCLOUD_IMG_URL
-                    if str(streamtype) == "audio"
-                    else config.TELEGRAM_VIDEO_URL
-                ),
-                caption=_["stream_1"].format(
+            run = await send_now_playing_rich(
+                app,
+                chat_id,
+                message.chat.id,
+                config.SOUNCLOUD_IMG_URL,
+                _["stream_1"].format(
                     config.SUPPORT_CHAT, title[:23], check[0]["dur"], user
                 ),
-                reply_markup=InlineKeyboardMarkup(button),
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
+
         else:
-            button = stream_markup(_, videoid, chat_id)
             img = await get_thumb(videoid)
-            run = await message.reply_photo(
-                photo=img,
-                caption=_["stream_1"].format(
+            run = await send_now_playing_rich(
+                app,
+                chat_id,
+                message.chat.id,
+                img,
+                _["stream_1"].format(
                     f"https://t.me/{app.username}?start=info_{videoid}",
                     title[:23],
                     check[0]["dur"],
                     user,
                 ),
-                reply_markup=InlineKeyboardMarkup(button),
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
