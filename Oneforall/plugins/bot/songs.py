@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from PIL import Image
-from py_yt import VideosSearch
+from youtubesearchpython.__future__ import VideosSearch
 from pyrogram import filters, types
 from pyrogram.enums import ButtonStyle
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
