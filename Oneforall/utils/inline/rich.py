@@ -10,6 +10,7 @@ from Oneforall.utils.database import get_lang
 from Oneforall.utils.formatters import seconds_to_min, time_to_seconds
 from strings import get_string
 
+# Regex for tags
 _TAG_RE = re.compile(
     r"<(/?)(b|u|a|emoji)(?:\s+(?:href|id)=([^>]+))?>",
     re.IGNORECASE,
@@ -24,11 +25,13 @@ async def _lang(chat_id):
 
 def _make_custom_emoji(text, eid):
     try:
-        return types.RichTextCustomEmoji(text=text, document_id=int(eid))
+        val = int(str(eid).strip("\"' "))
+        return types.RichTextCustomEmoji(text=text, document_id=val)
     except Exception:
         pass
     try:
-        return types.RichTextCustomEmoji(text=text, custom_emoji_id=int(eid))
+        val = int(str(eid).strip("\"' "))
+        return types.RichTextCustomEmoji(text=text, custom_emoji_id=val)
     except Exception:
         pass
     return text
@@ -51,8 +54,7 @@ def _parse_inline(segment):
         attr = m.group(3)
 
         if not closing:
-            clean_attr = attr.strip("\"'") if attr else None
-            stack.append((tag, clean_attr, len(parts)))
+            stack.append((tag, attr, len(parts)))
         elif stack and stack[-1][0] == tag:
             open_tag, val, start = stack.pop()
             inner = parts[start:]
@@ -64,7 +66,8 @@ def _parse_inline(segment):
             elif open_tag == "u":
                 parts.append(types.RichTextUnderline(text=inner))
             elif open_tag == "a":
-                parts.append(types.RichTextUrl(text=inner, url=val))
+                clean_url = val.strip("\"' ") if val else ""
+                parts.append(types.RichTextUrl(text=inner, url=clean_url))
             elif open_tag == "emoji":
                 parts.append(_make_custom_emoji(inner or "🌟", val))
 
@@ -254,26 +257,21 @@ async def _download_photo_if_url(photo):
     return None
 
 
-def _make_photo_block(local_photo):
-    try:
-        return types.InputRichBlockPhoto(photo=types.InputMediaPhoto(local_photo))
-    except Exception:
-        try:
-            return types.InputRichBlockPhoto(photo=types.InputMediaPhoto(media=local_photo))
-        except Exception:
-            return None
-
-
 async def build_now_playing_blocks(
     _, photo, caption_html, chat_id, played=None, dur=None, playing=True
 ):
     blocks = []
 
+    # Safe Photo Block handling
     local_photo = await _download_photo_if_url(photo)
-    if local_photo:
-        p_block = _make_photo_block(local_photo)
-        if p_block:
-            blocks.append(p_block)
+    if local_photo and os.path.isfile(str(local_photo)):
+        try:
+            blocks.append(types.InputRichBlockPhoto(photo=types.InputMediaPhoto(local_photo)))
+        except Exception:
+            try:
+                blocks.append(types.InputRichBlockPhoto(photo=types.InputMediaPhoto(media=local_photo)))
+            except Exception:
+                pass
 
     blocks += _html_caption_to_blocks(caption_html)
 
