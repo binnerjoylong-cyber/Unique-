@@ -15,6 +15,7 @@ from config import BANNED_USERS, SERVER_PLAYLIST_LIMIT
 from Oneforall import Carbon, app
 from Oneforall.core.mongo import mongodb
 from Oneforall.misc import db
+from Oneforall.utils.database import get_lang
 from Oneforall.utils.decorators.language import language, languageCB
 from Oneforall.utils.inline.playlist import (
     botplaylist_markup,
@@ -29,6 +30,7 @@ from Oneforall.utils.inline.rich import (
 )
 from Oneforall.utils.pastebin import HottyBin
 from Oneforall.utils.stream.stream import stream
+from strings import get_string
 
 playlistdb = mongodb.playlist
 user_last_message_time = {}
@@ -42,6 +44,10 @@ DELETEPLAYLIST_COMMAND = "delplaylist"
 DELETE_ALL_PLAYLIST_COMMAND = "delallplaylist"
 
 PAGE_SIZE = 7
+
+
+async def _lang(chat_id):
+    return get_string(await get_lang(chat_id))
 
 
 async def _get_playlists(chat_id: int) -> Dict[str, int]:
