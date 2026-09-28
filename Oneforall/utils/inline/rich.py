@@ -235,8 +235,13 @@ def _control_rows(chat_id, playing=True):
                     callback_data=f"add_playlist|{chat_id}",
                 ),
                 types.RichMessageButton(
-                    text=f"≡ Queue · {q_len}",
+                    text="🎲 Autoplay",
                     style=enums.ButtonStyle.PRIMARY,
+                    callback_data=f"open_autoplay_card|{chat_id}",
+                ),
+                types.RichMessageButton(
+                    text=f"≡ Queue · {q_len}",
+                    style=enums.ButtonStyle.DEFAULT,
                     callback_data=f"nowplaying_queue {chat_id}",
                 ),
             ]
