@@ -5,12 +5,15 @@ import re
 import aiohttp
 from pyrogram import enums, errors, types
 from Oneforall.misc import db
+from Oneforall.core.mongo import mongodb
 from Oneforall.utils.database import get_lang
 from Oneforall.utils.formatters import seconds_to_min, time_to_seconds
 from strings import get_string
 
+autoplaydb = mongodb.autoplay
+
 _TAG_RE = re.compile(
-    r"<(/?)(b|u|a|emoji)(?:\s+(?:href|id)=([^>]+))?>",
+    r"<(/?)(b|u|a|code|emoji)(?:\s+(?:href|id)=([^>]+))?>",
     re.IGNORECASE,
 )
 _consumed = set()
@@ -63,6 +66,8 @@ def _parse_inline(segment):
                 parts.append(types.RichTextBold(text=inner))
             elif open_tag == "u":
                 parts.append(types.RichTextUnderline(text=inner))
+            elif open_tag == "code":
+                parts.append(types.RichTextCode(text=inner))
             elif open_tag == "a":
                 parts.append(types.RichTextUrl(text=inner, url=val.strip("\"' ")))
             elif open_tag == "emoji":
@@ -196,7 +201,7 @@ def _queue_len(chat_id):
     return max(len(tracks) - 1, 0) if tracks else 0
 
 
-def _control_rows(chat_id, playing=True):
+async def _control_rows(chat_id, playing=True):
     q_len = _queue_len(chat_id)
     toggle = (
         types.RichMessageButton(
@@ -211,6 +216,24 @@ def _control_rows(chat_id, playing=True):
             callback_data=f"ADMIN Resume|{chat_id}",
         )
     )
+
+    # Autoplay Status Check for button styling
+    doc = await autoplaydb.find_one({"chat_id": chat_id})
+    is_auto = doc.get("autoplay", False) if doc else False
+
+    if is_auto:
+        auto_btn = types.RichMessageButton(
+            text="🟢 Autoplay On",
+            style=enums.ButtonStyle.SUCCESS,
+            callback_data=f"open_autoplay_card|{chat_id}",
+        )
+    else:
+        auto_btn = types.RichMessageButton(
+            text="🔴 Autoplay Off",
+            style=enums.ButtonStyle.DANGER,
+            callback_data=f"open_autoplay_card|{chat_id}",
+        )
+
     return [
         types.InputRichBlockButtons(
             buttons=[
@@ -234,11 +257,7 @@ def _control_rows(chat_id, playing=True):
                     style=enums.ButtonStyle.SUCCESS,
                     callback_data=f"add_playlist|{chat_id}",
                 ),
-                types.RichMessageButton(
-                    text="🎲 Autoplay",
-                    style=enums.ButtonStyle.PRIMARY,
-                    callback_data=f"open_autoplay_card|{chat_id}",
-                ),
+                auto_btn,
                 types.RichMessageButton(
                     text=f"≡ Queue · {q_len}",
                     style=enums.ButtonStyle.DEFAULT,
@@ -283,7 +302,7 @@ def _format_photo_block(photo):
             return None
 
 
-def build_now_playing_blocks(
+async def build_now_playing_blocks(
     _, photo, caption_html, chat_id, played=None, dur=None, playing=True
 ):
     blocks = []
@@ -300,7 +319,8 @@ def build_now_playing_blocks(
     cur_dur = dur if dur else "00:00"
 
     blocks.append(_progress_row(cur_played, cur_dur))
-    blocks += _control_rows(chat_id, playing)
+    ctrls = await _control_rows(chat_id, playing)
+    blocks += ctrls
     return blocks
 
 
@@ -384,7 +404,7 @@ async def send_now_playing_rich(
     local_photo = await _download_photo_if_url(photo)
     resolved_photo = local_photo or photo
     dur = db[chat_id][0].get("dur") if db.get(chat_id) else None
-    blocks = build_now_playing_blocks(_, resolved_photo, caption_html, chat_id, played="00:00", dur=dur, playing=True)
+    blocks = await build_now_playing_blocks(_, resolved_photo, caption_html, chat_id, played="00:00", dur=dur, playing=True)
     msg = await _deliver(client, target_chat_id, blocks, replace)
     if db.get(chat_id):
         db[chat_id][0]["np_photo"] = resolved_photo
@@ -454,7 +474,7 @@ async def update_now_playing_progress(mystic, chat_id, played, dur, playing=True
     if not photo or not caption_html:
         return None
     _ = await _lang(chat_id)
-    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
     return await _edit_rich(mystic, blocks)
 
 
@@ -470,7 +490,7 @@ async def set_now_playing_state(chat_id, playing):
     played = seconds_to_min(info[0].get("played", 0)) or "00:00"
     dur = info[0].get("dur")
     _ = await _lang(chat_id)
-    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
     try:
         return await _edit_rich(mystic, blocks)
     except Exception:
@@ -516,7 +536,7 @@ def rich_autoplay_mood_blocks(caption_html: str):
             buttons=[
                 types.RichMessageButton(
                     text="✖ Close",
-                    style=enums.ButtonStyle.DEFAULT,
+                    style=enums.ButtonStyle.DANGER,
                     callback_data="close_panel",
                 )
             ]
@@ -556,6 +576,17 @@ def rich_autoplay_language_blocks(caption_html: str):
                     style=enums.ButtonStyle.PRIMARY,
                     callback_data="songconfig_language:haryanvi",
                 ),
+            ]
+        )
+    )
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="✖ Close",
+                    style=enums.ButtonStyle.DANGER,
+                    callback_data="close_panel",
+                )
             ]
         )
     )
