@@ -3,12 +3,7 @@ from pyrogram import filters, types, enums
 
 from config import BANNED_USERS, lyrical
 from Oneforall import YouTube, app
-from Oneforall.utils.database import (
-    is_autoplay_on,
-    get_autoplay_mood,
-    set_autoplay,
-    set_autoplay_mood,
-)
+from Oneforall.core.mongo import mongodb
 from Oneforall.utils.decorators.language import languageCB
 from Oneforall.utils.inline.rich import (
     deliver_rich,
@@ -18,8 +13,39 @@ from Oneforall.utils.inline.rich import (
     html_to_rich_blocks,
 )
 
-# Store previous tracks per chat
+autoplaydb = mongodb.autoplay
 previous_tracks = {}
+
+
+# Database Helpers directly defined to prevent import errors
+async def is_autoplay_on(chat_id: int) -> bool:
+    mode = await autoplaydb.find_one({"chat_id": chat_id})
+    if not mode:
+        return False
+    return mode.get("autoplay", False)
+
+
+async def set_autoplay(chat_id: int, status: bool):
+    await autoplaydb.update_one(
+        {"chat_id": chat_id},
+        {"$set": {"autoplay": status}},
+        upsert=True,
+    )
+
+
+async def get_autoplay_mood(chat_id: int):
+    mode = await autoplaydb.find_one({"chat_id": chat_id})
+    if not mode:
+        return {"mood": "chill", "language": "hindi"}
+    return mode.get("mood_data", {"mood": "chill", "language": "hindi"})
+
+
+async def set_autoplay_mood(chat_id: int, mood_data: dict):
+    await autoplaydb.update_one(
+        {"chat_id": chat_id},
+        {"$set": {"mood_data": mood_data}},
+        upsert=True,
+    )
 
 
 @app.on_message(filters.command("songconfig") & filters.group & ~BANNED_USERS)
@@ -176,11 +202,11 @@ async def get_autoplay_recommendation(chat_id: int):
     mood_data = await get_autoplay_mood(chat_id)
 
     mood = "chill"
-    language = "english"
+    language = "hindi"
 
     if isinstance(mood_data, dict):
         mood = mood_data.get("mood", "chill")
-        language = mood_data.get("language", "english")
+        language = mood_data.get("language", "hindi")
 
     query = f"best {language} {mood} songs"
 
