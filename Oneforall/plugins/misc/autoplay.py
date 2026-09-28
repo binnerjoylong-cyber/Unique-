@@ -11,6 +11,7 @@ from Oneforall.utils.inline.rich import (
     rich_autoplay_mood_blocks,
     rich_autoplay_language_blocks,
     html_to_rich_blocks,
+    update_now_playing_markup,
 )
 
 autoplaydb = mongodb.autoplay
@@ -55,8 +56,8 @@ async def songconfig_command(client, message, _):
     caption = (
         "<blockquote><emoji id=5895705279416241926>🎵</emoji> <u><b>AUTOPLAY CONFIGURATION</b></u></blockquote>\n\n"
         "<blockquote expandable>"
-        "<emoji id=5974235702701853774>✨</emoji> Select your desired mood vibe below.\n"
-        "<emoji id=5409132617750555920>⚡</emoji> Bot will stream infinite matched songs automatically.</blockquote>"
+        "<emoji id=5974235702701853774>✨</emoji> Select preferred mood for continuous stream:\n"
+        "<emoji id=5409132617750555920>⚡</emoji> Bot will stream matching tracks after current song ends.</blockquote>"
     )
     blocks = rich_autoplay_mood_blocks(caption)
     await deliver_rich(client, message.chat.id, blocks)
@@ -81,8 +82,8 @@ async def handle_mood_selection(client, CallbackQuery, _):
     caption = (
         f"<blockquote><emoji id=5895705279416241926>🎵</emoji> <u><b>MOOD: {mood.upper()}</b></u></blockquote>\n\n"
         "<blockquote expandable>"
-        "<emoji id=6066395745139824604>🌐</emoji> <b>Now select language preference:</b>\n"
-        "Recommendations will be fetched based on your choice.</blockquote>"
+        "<emoji id=6066395745139824604>🌐</emoji> <b>Select language preference:</b>\n"
+        "Song search will be based on this language.</blockquote>"
     )
     blocks = rich_autoplay_language_blocks(caption)
     await edit_rich(CallbackQuery.message, blocks)
@@ -91,7 +92,7 @@ async def handle_mood_selection(client, CallbackQuery, _):
 @app.on_callback_query(filters.regex(r"^songconfig_language:"))
 @languageCB
 async def handle_language_selection(client, CallbackQuery, _):
-    """Handle language selection callback"""
+    """Handle language selection callback and auto-close menu"""
     chat_id = CallbackQuery.message.chat.id
 
     try:
@@ -115,31 +116,23 @@ async def handle_language_selection(client, CallbackQuery, _):
 
     lyrical[chat_id].pop("autoplay_mood", None)
 
-    caption = (
-        "<blockquote><emoji id=5895705279416241926>✅</emoji> <u><b>AUTOPLAY ACTIVE</b></u></blockquote>\n\n"
-        "<blockquote expandable>"
-        f"<emoji id=6066395745139824604>🎵</emoji> <b>Mood :</b> <code>{mood.title()}</code>\n"
-        f"<emoji id=5974235702701853774>🌐</emoji> <b>Language :</b> <code>{language.title()}</code>\n\n"
-        "<emoji id=5409132617750555920>⚡</emoji> Bot will now automatically play matching tracks continuously!</blockquote>"
+    # 1. Alert popup notification
+    await CallbackQuery.answer(
+        f"✅ Autoplay Enabled!\nMood: {mood.title()} | Language: {language.title()}\nQueue khatam hote hi continuous bajega!",
+        show_alert=True,
     )
-    blocks = html_to_rich_blocks(caption)
-    blocks.append(
-        types.InputRichBlockButtons(
-            buttons=[
-                types.RichMessageButton(
-                    text="⚙️ Re-Configure",
-                    style=enums.ButtonStyle.PRIMARY,
-                    callback_data="AutoPlay_reconfig",
-                ),
-                types.RichMessageButton(
-                    text="❌ Disable",
-                    style=enums.ButtonStyle.DANGER,
-                    callback_data=f"AutoPlay|{chat_id}",
-                ),
-            ]
-        )
-    )
-    await edit_rich(CallbackQuery.message, blocks)
+
+    # 2. Panel message ko auto-delete kar do taaki chat me bekar na dikhe
+    try:
+        await CallbackQuery.message.delete()
+    except Exception:
+        pass
+
+    # 3. Now Playing card ko turant live '🟢 Autoplay On' me switch kar do
+    try:
+        await update_now_playing_markup(client, chat_id, playing=True)
+    except Exception:
+        pass
 
 
 @app.on_callback_query(filters.regex(r"^AutoPlay"))
@@ -165,26 +158,20 @@ async def toggle_autoplay(client, CallbackQuery, _):
     autoplay_status = await is_autoplay_on(chat_id)
 
     if autoplay_status:
+        # Off kar rahe hain: Database off, alert, auto-delete panel, aur card red
         await set_autoplay(chat_id, False)
-        caption = (
-            "<blockquote><emoji id=5895705279416241926>❌</emoji> <u><b>AUTOPLAY DISABLED</b></u></blockquote>\n\n"
-            "<blockquote expandable>"
-            "Queue khatam hone par bot music band kar dega.</blockquote>"
-        )
-        blocks = html_to_rich_blocks(caption)
-        blocks.append(
-            types.InputRichBlockButtons(
-                buttons=[
-                    types.RichMessageButton(
-                        text="▶️ Turn On Autoplay",
-                        style=enums.ButtonStyle.SUCCESS,
-                        callback_data=f"AutoPlay|{chat_id}",
-                    )
-                ]
-            )
-        )
-        return await edit_rich(CallbackQuery.message, blocks)
+        await CallbackQuery.answer("❌ Autoplay Disabled!", show_alert=True)
+        try:
+            await CallbackQuery.message.delete()
+        except Exception:
+            pass
+        try:
+            await update_now_playing_markup(client, chat_id, playing=True)
+        except Exception:
+            pass
+        return
 
+    # Agar OFF tha aur ON karne ke liye dabaya: Direct mood config khol do
     caption = (
         "<blockquote><emoji id=5895705279416241926>🎵</emoji> <u><b>ENABLE AUTOPLAY</b></u></blockquote>\n\n"
         "<blockquote expandable>"
@@ -208,18 +195,23 @@ async def get_autoplay_recommendation(chat_id: int):
         mood = mood_data.get("mood", "chill")
         language = mood_data.get("language", "hindi")
 
-    query = f"best {language} {mood} songs"
+    search_queries = [
+        f"best {language} {mood} songs audio",
+        f"popular {language} {mood} hit songs",
+        f"{language} {mood} mashup latest",
+    ]
+    query = random.choice(search_queries)
 
     try:
         track_data, track_id = await YouTube.track(query)
         if not track_data or not track_id:
             return None, None
 
-        used_ids = [x["vidid"] for x in previous_tracks[chat_id]]
+        used_ids = [x.get("vidid") for x in previous_tracks[chat_id]]
         if track_id in used_ids:
             return None, None
 
-        if len(previous_tracks[chat_id]) >= 10:
+        if len(previous_tracks[chat_id]) >= 15:
             previous_tracks[chat_id].pop(0)
 
         previous_tracks[chat_id].append(
