@@ -217,7 +217,6 @@ async def _control_rows(chat_id, playing=True):
         )
     )
 
-    # Autoplay Status Check for button styling
     doc = await autoplaydb.find_one({"chat_id": chat_id})
     is_auto = doc.get("autoplay", False) if doc else False
 
@@ -495,6 +494,46 @@ async def set_now_playing_state(chat_id, playing):
         return await _edit_rich(mystic, blocks)
     except Exception:
         return None
+
+
+async def update_now_playing_markup(client, chat_id: int, playing: bool = True):
+    tracks = db.get(chat_id)
+    if not tracks:
+        return
+    cur = tracks[0]
+    photo = cur.get("np_photo")
+    caption = cur.get("np_caption")
+    dur = cur.get("dur")
+    msg_id = cur.get("mystic")
+
+    if not msg_id or not caption:
+        return
+
+    _ = await _lang(chat_id)
+    blocks = await build_now_playing_blocks(
+        _, photo, caption, chat_id, played="00:00", dur=dur, playing=playing
+    )
+    rich = types.InputRichMessage(blocks=blocks)
+    try:
+        if isinstance(msg_id, types.Message):
+            await msg_id.edit_text(rich_message=rich)
+        else:
+            await client.edit_message_text(
+                chat_id=chat_id, message_id=msg_id, rich_message=rich
+            )
+    except Exception:
+        try:
+            plain = _strip_photo(blocks)
+            if isinstance(msg_id, types.Message):
+                await msg_id.edit_text(rich_message=types.InputRichMessage(blocks=plain))
+            else:
+                await client.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    rich_message=types.InputRichMessage(blocks=plain),
+                )
+        except Exception:
+            pass
 
 
 def rich_autoplay_mood_blocks(caption_html: str):
