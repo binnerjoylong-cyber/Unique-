@@ -1,6 +1,6 @@
 import asyncio
 
-from pyrogram import filters
+from pyrogram import enums, filters, types
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import (
@@ -34,6 +34,8 @@ from Oneforall.utils.inline.rich import (
     send_now_playing_rich,
     set_now_playing_state,
     update_now_playing_progress,
+    deliver_rich,
+    html_to_rich_blocks,
 )
 from Oneforall.utils.stream.autoclear import auto_clean
 from Oneforall.utils.thumbnails import get_thumb
@@ -177,7 +179,10 @@ async def del_back_playlist(client, CallbackQuery, _):
         await CallbackQuery.message.reply_text(
             _["admin_5"].format(mention), reply_markup=close_markup(_)
         )
-        await CallbackQuery.message.delete()
+        try:
+            await CallbackQuery.message.delete()
+        except:
+            pass
     elif command == "Skip" or command == "Replay":
         check = db.get(chat_id)
         if command == "Skip":
@@ -191,21 +196,100 @@ async def del_back_playlist(client, CallbackQuery, _):
                 popped = check.pop(0)
                 if popped:
                     await auto_clean(popped)
+                
+                # Check for Autoplay if Queue is empty on Skip
                 if not check:
-                    await CallbackQuery.edit_message_text(
-                        f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
+                    from Oneforall.plugins.misc.autoplay import (
+                        is_autoplay_on,
+                        get_autoplay_mood,
+                        get_autoplay_recommendation,
                     )
-                    await CallbackQuery.message.reply_text(
-                        text=_["admin_6"].format(
-                            mention, CallbackQuery.message.chat.title
-                        ),
-                        reply_markup=close_markup(_),
-                    )
-                    try:
+                    if await is_autoplay_on(chat_id):
+                        track_data, track_id = await get_autoplay_recommendation(chat_id)
+                        if track_data and track_id:
+                            mood_info = await get_autoplay_mood(chat_id)
+                            m_tag = mood_info.get("mood", "sad").title()
+                            l_tag = mood_info.get("language", "hindi").title()
+                            auto_requester = f"Autoplay [{m_tag} | {l_tag}]"
+                            title = track_data.get("title")
+                            dur_sec = track_data.get("duration_sec", 0)
+                            duration = seconds_to_min(dur_sec) or "03:00"
+
+                            # Clean previous autoplay card if any
+                            prev_auto_msg = getattr(Hotty, f"_auto_msg_{chat_id}", None)
+                            if prev_auto_msg:
+                                try:
+                                    await prev_auto_msg.delete()
+                                except:
+                                    pass
+
+                            # Send new Rich Autoplay Queue card
+                            caption = (
+                                "<blockquote><emoji id=5895705279416241926>🎲</emoji> <u><b>AUTOPLAY STREAMING</b></u></blockquote>\n\n"
+                                "<blockquote expandable>"
+                                f"🎵 <b>Track:</b> {title[:40]}\n"
+                                f"⏱️ <b>Duration:</b> {duration}\n"
+                                f"✨ <b>Vibe:</b> <code>{m_tag}</code> | <b>Language:</b> <code>{l_tag}</code>\n"
+                                f"🤖 <b>Requested By:</b> <code>Autoplay Engine</code></blockquote>"
+                            )
+                            blocks = html_to_rich_blocks(caption)
+                            blocks.append(
+                                types.InputRichBlockButtons(
+                                    buttons=[
+                                        types.RichMessageButton(
+                                            text="» Skip",
+                                            style=enums.ButtonStyle.PRIMARY,
+                                            callback_data=f"ADMIN Skip|{chat_id}",
+                                        ),
+                                        types.RichMessageButton(
+                                            text="❌ Disable Autoplay",
+                                            style=enums.ButtonStyle.DANGER,
+                                            callback_data=f"AutoPlay|{chat_id}",
+                                        ),
+                                    ]
+                                )
+                            )
+                            auto_msg = await deliver_rich(app, chat_id, blocks)
+                            setattr(Hotty, f"_auto_msg_{chat_id}", auto_msg)
+
+                            db[chat_id] = [
+                                {
+                                    "title": title,
+                                    "dur": duration,
+                                    "streamtype": "audio",
+                                    "by": auto_requester,
+                                    "chat_id": chat_id,
+                                    "file": f"vid_{track_id}",
+                                    "vidid": track_id,
+                                    "seconds": dur_sec,
+                                    "played": 0,
+                                }
+                            ]
+                            check = db.get(chat_id)
+                        else:
+                            await CallbackQuery.edit_message_text(
+                                f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
+                            )
+                            await CallbackQuery.message.reply_text(
+                                text=_["admin_6"].format(
+                                    mention, CallbackQuery.message.chat.title
+                                ),
+                                reply_markup=close_markup(_),
+                            )
+                            return await Hotty.stop_stream(chat_id)
+                    else:
+                        # Normal skip if Autoplay is OFF
+                        await CallbackQuery.edit_message_text(
+                            f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
+                        )
+                        await CallbackQuery.message.reply_text(
+                            text=_["admin_6"].format(
+                                mention, CallbackQuery.message.chat.title
+                            ),
+                            reply_markup=close_markup(_),
+                        )
                         return await Hotty.stop_stream(chat_id)
-                    except:
-                        return
-            except:
+            except Exception:
                 try:
                     await CallbackQuery.edit_message_text(
                         f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
@@ -221,6 +305,7 @@ async def del_back_playlist(client, CallbackQuery, _):
                     return
         else:
             txt = f"➻ sᴛʀᴇᴀᴍ ʀᴇ-ᴘʟᴀʏᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
+
         await CallbackQuery.answer()
         queued = check[0]["file"]
         title = (check[0]["title"]).title()
@@ -236,6 +321,7 @@ async def del_back_playlist(client, CallbackQuery, _):
             db[chat_id][0]["seconds"] = check[0]["old_second"]
             db[chat_id][0]["speed_path"] = None
             db[chat_id][0]["speed"] = 1.0
+
         if "live_" in queued:
             n, link = await YouTube.video(videoid, True)
             if n == 0:
@@ -267,7 +353,10 @@ async def del_back_playlist(client, CallbackQuery, _):
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
-            await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+            try:
+                await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+            except:
+                pass
         elif "vid_" in queued:
             mystic = await CallbackQuery.message.reply_text(
                 _["call_7"], disable_web_page_preview=True
@@ -308,7 +397,10 @@ async def del_back_playlist(client, CallbackQuery, _):
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
-            await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+            try:
+                await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+            except:
+                pass
             await mystic.delete()
         elif "index_" in queued:
             try:
@@ -325,7 +417,10 @@ async def del_back_playlist(client, CallbackQuery, _):
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
-            await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+            try:
+                await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+            except:
+                pass
         else:
             if videoid == "telegram":
                 image = None
@@ -388,7 +483,10 @@ async def del_back_playlist(client, CallbackQuery, _):
                 )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
-            await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+            try:
+                await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+            except:
+                pass
 
 
 async def markup_timer():
