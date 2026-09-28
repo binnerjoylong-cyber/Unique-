@@ -8,7 +8,7 @@ import httpx
 import yt_dlp
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython import VideosSearch
 
 
 from Oneforall.utils.database import is_on_off
@@ -176,13 +176,13 @@ class YouTubeAPI:
         proc = await asyncio.create_subprocess_exec(
             "yt-dlp",
             "--extractor-args",
-            "youtubepot-bgutilscript:script_path=/home/nand/bgutil-ytdlp-pot-provider/server/build/generate_once.js",
+            "youtubepot-bgutilscript:script_path=/root/bgutil-ytdlp-pot-provider/server/build/generate_once.js",
             "--remote-components",
             "ejs:github",
             "--js-runtimes",
-            "bun:/home/nand/.bun/bin/bun",
+            "bun:/root/.bun/bin/bun",
             "--cookies",
-            "/home/nand/Roohi/youtube.txt",
+            "/root/Unique-/youtube.txt",
             "-g",
             "-f",
             "bestaudio/best",
@@ -227,16 +227,16 @@ class YouTubeAPI:
             "quiet": True,
             "no_warnings": True,
             "extract_flat": True,
-            "cookiefile": "/home/nand/Roohi/youtube.txt",
+            "cookiefile": "/root/Unique-/youtube.txt",
             "js_runtimes": {
                 "bun": {
-                    "path": "/home/nand/.bun/bin/bun"
+                    "path": "/root/.bun/bin/bun"
                 }
             },
             "remote_components": ["ejs:github"],
             "extractor_args": {
                 "youtubepot-bgutilscript": {
-                    "script_path": "/home/nand/bgutil-ytdlp-pot-provider/server/build/generate_once.js"
+                    "script_path": "/root/bgutil-ytdlp-pot-provider/server/build/generate_once.js"
                 }
             },
         }
@@ -278,7 +278,7 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
-        ytdl_opts = {"quiet": True, "cookiefile": "/home/nand/Roohi/youtube.txt"}
+        ytdl_opts = {"quiet": True, "cookiefile": "/root/Unique-/youtube.txt"}
         ydl = yt_dlp.YoutubeDL(ytdl_opts)
         with ydl:
             formats_available = []
@@ -355,7 +355,7 @@ class YouTubeAPI:
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                "cookiefile": "/home/nand/Roohi/youtube.txt",
+                "cookiefile": "/root/Unique-/youtube.txt",
                 "extractor_args": {
                     "youtube": {
                         "player_client": ["mweb"],
@@ -363,13 +363,13 @@ class YouTubeAPI:
                 },
                 "js_runtimes": {
                     "bun": {
-                        "path": "/home/nand/.bun/bin/bun"
+                        "path": "/root/.bun/bin/bun"
                     }
                 },
                 "remote_components": ["ejs:github"],
                 "extractor_args": {
                     "youtubepot-bgutilscript": {
-                        "script_path": "/home/nand/bgutil-ytdlp-pot-provider/server/build/generate_once.js"
+                        "script_path": "/root/bgutil-ytdlp-pot-provider/server/build/generate_once.js"
                     }
                 },
             }
@@ -392,7 +392,7 @@ class YouTubeAPI:
                 "nocheckcertificate": True,
                 "quiet": True,
                 "no_warnings": True,
-                "cookiefile": "/home/nand/Roohi/youtube.txt",
+                "cookiefile": "/root/Unique-/youtube.txt",
                 "extractor_args": {
                     "youtube": {
                         "player_client": ["mweb"],
@@ -400,13 +400,13 @@ class YouTubeAPI:
                 },
                 "js_runtimes": {
                     "bun": {
-                        "path": "/home/nand/.bun/bin/bun"
+                        "path": "/root/.bun/bin/bun"
                     }
                 },
                 "remote_components": ["ejs:github"],
                 "extractor_args": {
                     "youtubepot-bgutilscript": {
-                        "script_path": "/home/nand/bgutil-ytdlp-pot-provider/server/build/generate_once.js"
+                        "script_path": "/root/bgutil-ytdlp-pot-provider/server/build/generate_once.js"
                     }
                 },
             }
@@ -436,7 +436,7 @@ class YouTubeAPI:
                 "no_warnings": True,
                 "prefer_ffmpeg": True,
                 "merge_output_format": "mp4",
-                "cookiefile": "/home/nand/Roohi/youtube.txt",
+                "cookiefile": "/root/Unique-/youtube.txt",
                 "extractor_args": {"youtube": {"player_client": ["mweb"]}},
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)
@@ -459,7 +459,7 @@ class YouTubeAPI:
                         "preferredquality": "192",
                     }
                 ],
-                "cookiefile": "/home/nand/Roohi/youtube.txt",
+                "cookiefile": "/root/Unique-/youtube.txt",
                 "extractor_args": {"youtube": {"player_client": ["mweb"]}},
             }
             x = yt_dlp.YoutubeDL(ydl_optssx)

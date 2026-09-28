@@ -4,7 +4,7 @@ from random import randint
 from typing import Union
 from uuid import uuid4
 
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython import VideosSearch
 
 import config
 from Oneforall import Carbon, YouTube, app

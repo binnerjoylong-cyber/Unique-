@@ -5,7 +5,7 @@ import re
 import aiofiles
 import aiohttp
 from PIL import Image, ImageEnhance, ImageOps
-from youtubesearchpython.__future__ import VideosSearch
+from youtubesearchpython import VideosSearch
 
 from config import YOUTUBE_IMG_URL
 
