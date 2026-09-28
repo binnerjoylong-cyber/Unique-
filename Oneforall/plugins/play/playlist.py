@@ -1,4 +1,5 @@
 import asyncio
+import math
 import os
 import time
 from random import randint
@@ -24,6 +25,7 @@ from Oneforall.utils.inline.rich import (
     deliver_rich,
     edit_rich,
     html_to_rich_blocks,
+    rich_autoplay_mood_blocks,
 )
 from Oneforall.utils.pastebin import HottyBin
 from Oneforall.utils.stream.stream import stream
@@ -38,6 +40,8 @@ ADDPLAYLIST_COMMAND = "addplaylist"
 PLAYLIST_COMMAND = "playlist"
 DELETEPLAYLIST_COMMAND = "delplaylist"
 DELETE_ALL_PLAYLIST_COMMAND = "delallplaylist"
+
+PAGE_SIZE = 7
 
 
 async def _get_playlists(chat_id: int) -> Dict[str, int]:
@@ -78,13 +82,21 @@ async def delete_playlist(chat_id: int, name: str) -> bool:
     return False
 
 
-async def get_rich_del_blocks(_, user_id):
-    _playlist = await get_playlist_names(user_id)
-    count = len(_playlist)
+async def get_rich_del_page(user_id: int, page: int = 0):
+    all_tracks = await get_playlist_names(user_id)
+    total_tracks = len(all_tracks)
+    if total_tracks == 0:
+        return [], 0, 0
+
+    total_pages = math.ceil(total_tracks / PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+    current_batch = all_tracks[start:end]
+
     blocks = []
-    
-    # 5 tracks per row maximum or 1 per row for long titles
-    for x in _playlist[:15]:
+    for x in current_batch:
         _note = await get_playlist(user_id, x)
         title = _note["title"].title() if _note else str(x)
         blocks.append(
@@ -93,12 +105,40 @@ async def get_rich_del_blocks(_, user_id):
                     types.RichMessageButton(
                         text=f"🗑️ {title[:28]}",
                         style=enums.ButtonStyle.PRIMARY,
-                        callback_data=f"del_playlist {x}",
+                        callback_data=f"del_track|{page}|{x}",
                     )
                 ]
             )
         )
-    
+
+    # Nav Row (Previous, Indicator, Next)
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            types.RichMessageButton(
+                text="⬅️ Back",
+                style=enums.ButtonStyle.DEFAULT,
+                callback_data=f"del_page|{page - 1}",
+            )
+        )
+    nav_buttons.append(
+        types.RichMessageButton(
+            text=f"📄 {page + 1}/{total_pages}",
+            style=enums.ButtonStyle.DEFAULT,
+            callback_data="del_page_indicator",
+        )
+    )
+    if page < total_pages - 1:
+        nav_buttons.append(
+            types.RichMessageButton(
+                text="Next ➡️",
+                style=enums.ButtonStyle.DEFAULT,
+                callback_data=f"del_page|{page + 1}",
+            )
+        )
+    blocks.append(types.InputRichBlockButtons(buttons=nav_buttons))
+
+    # Action Row
     blocks.append(
         types.InputRichBlockButtons(
             buttons=[
@@ -115,7 +155,7 @@ async def get_rich_del_blocks(_, user_id):
             ]
         )
     )
-    return blocks, count
+    return blocks, total_tracks, total_pages
 
 
 @app.on_message(filters.command(PLAYLIST_COMMAND) & ~BANNED_USERS)
@@ -139,7 +179,7 @@ async def check_playlist(client, message: Message, _):
         user_command_count[user_id] = 1
         user_last_message_time[user_id] = current_time
 
-    _playlist = await get_playlist_names(user_id)
+    _playlist = await get_playlist_names(message.from_user.id)
     if not _playlist:
         return await message.reply_text(_["playlist_3"])
 
@@ -159,35 +199,57 @@ async def check_playlist(client, message: Message, _):
 @language
 async def del_plist_msg(client, message: Message, _):
     user_id = message.from_user.id
-    _playlist = await get_playlist_names(user_id)
-    if not _playlist:
+    del_blocks, total_tracks, total_pages = await get_rich_del_page(user_id, page=0)
+    if total_tracks == 0:
         return await message.reply_text(_["playlist_3"])
 
-    del_buttons, count = await get_rich_del_blocks(_, user_id)
     caption = (
         "<blockquote><emoji id=5895705279416241926>🗑️</emoji> <u><b>MANAGE & REMOVE TRACKS</b></u></blockquote>\n\n"
         "<blockquote expandable>"
-        f"Total <b>{count}</b> tracks in your playlist.\n"
-        "Click on any track button to remove it individually.</blockquote>"
+        f"Total <b>{total_tracks}</b> tracks inside playlist.\n"
+        "Use ⬅️ / ➡️ to switch pages and tap any song to delete.</blockquote>"
     )
     blocks = html_to_rich_blocks(caption)
-    blocks += del_buttons
+    blocks += del_blocks
     await deliver_rich(client, message.chat.id, blocks)
 
 
-@app.on_callback_query(filters.regex(r"^del_playlist\s+") & ~BANNED_USERS)
-@languageCB
-async def del_plist_cb(client, CallbackQuery, _):
-    videoid = CallbackQuery.data.split(None, 1)[1]
+@app.on_callback_query(filters.regex(r"^del_page\|") & ~BANNED_USERS)
+async def paginate_del_playlist(client, CallbackQuery):
+    page = int(CallbackQuery.data.split("|")[1])
     user_id = CallbackQuery.from_user.id
+    del_blocks, total_tracks, total_pages = await get_rich_del_page(user_id, page=page)
+    if total_tracks == 0:
+        caption = "<blockquote><emoji id=5895705279416241926>✨</emoji> <b>Your playlist is empty.</b></blockquote>"
+        blocks = html_to_rich_blocks(caption)
+        return await edit_rich(CallbackQuery.message, blocks)
+
+    caption = (
+        "<blockquote><emoji id=5895705279416241926>🗑️</emoji> <u><b>MANAGE & REMOVE TRACKS</b></u></blockquote>\n\n"
+        "<blockquote expandable>"
+        f"Total <b>{total_tracks}</b> tracks inside playlist.\n"
+        "Use ⬅️ / ➡️ to switch pages and tap any song to delete.</blockquote>"
+    )
+    blocks = html_to_rich_blocks(caption)
+    blocks += del_blocks
+    await edit_rich(CallbackQuery.message, blocks)
+
+
+@app.on_callback_query(filters.regex(r"^del_track\|") & ~BANNED_USERS)
+async def delete_single_track(client, CallbackQuery):
+    parts = CallbackQuery.data.split("|")
+    page = int(parts[1])
+    videoid = parts[2]
+    user_id = CallbackQuery.from_user.id
+
     deleted = await delete_playlist(user_id, videoid)
     if deleted:
-        await CallbackQuery.answer(_["playlist_11"], show_alert=True)
+        await CallbackQuery.answer("🗑️ Song removed from playlist!", show_alert=False)
     else:
-        return await CallbackQuery.answer(_["playlist_12"], show_alert=True)
+        await CallbackQuery.answer("❌ Song not found!", show_alert=True)
 
-    del_buttons, count = await get_rich_del_blocks(_, user_id)
-    if count == 0:
+    del_blocks, total_tracks, total_pages = await get_rich_del_page(user_id, page=page)
+    if total_tracks == 0:
         caption = "<blockquote><emoji id=5895705279416241926>✨</emoji> <b>Your playlist is now empty.</b></blockquote>"
         blocks = html_to_rich_blocks(caption)
         return await edit_rich(CallbackQuery.message, blocks)
@@ -195,102 +257,26 @@ async def del_plist_cb(client, CallbackQuery, _):
     caption = (
         "<blockquote><emoji id=5895705279416241926>🗑️</emoji> <u><b>MANAGE & REMOVE TRACKS</b></u></blockquote>\n\n"
         "<blockquote expandable>"
-        f"Total <b>{count}</b> tracks in your playlist.\n"
-        "Click on any track button to remove it individually.</blockquote>"
+        f"Total <b>{total_tracks}</b> tracks inside playlist.\n"
+        "Use ⬅️ / ➡️ to switch pages and tap any song to delete.</blockquote>"
     )
     blocks = html_to_rich_blocks(caption)
-    blocks += del_buttons
+    blocks += del_blocks
     await edit_rich(CallbackQuery.message, blocks)
 
 
-@app.on_callback_query(filters.regex("play_playlist") & ~BANNED_USERS)
-@languageCB
-async def play_playlist(client, CallbackQuery, _):
-    callback_data = CallbackQuery.data.strip()
-    mode = callback_data.split(None, 1)[1]
-    user_id = CallbackQuery.from_user.id
-    _playlist = await get_playlist_names(user_id)
-    if not _playlist:
-        try:
-            return await CallbackQuery.answer(_["playlist_3"], show_alert=True)
-        except Exception:
-            return
-
-    chat_id = CallbackQuery.message.chat.id
-    user_name = CallbackQuery.from_user.first_name
-    await CallbackQuery.message.delete()
-    result = list(_playlist)
-
-    try:
-        await CallbackQuery.answer()
-    except Exception:
-        pass
-
-    video = True if mode == "v" else None
-    mystic = await CallbackQuery.message.reply_text(_["play_1"])
-    try:
-        await stream(
-            _,
-            mystic,
-            user_id,
-            result,
-            chat_id,
-            user_name,
-            CallbackQuery.message.chat.id,
-            video,
-            streamtype="playlist",
-        )
-    except Exception as e:
-        ex_type = type(e).__name__
-        err = e if ex_type == "AssistantErr" else _["general_3"].format(ex_type)
-        return await mystic.edit_text(err)
-    return await mystic.delete()
-
-
-@app.on_message(
-    filters.command(["playplaylist", "vplayplaylist"]) & ~BANNED_USERS & filters.group
-)
-@languageCB
-async def play_playlist_command(client, message, _):
-    mode = message.command[0][0]
-    user_id = message.from_user.id
-    _playlist = await get_playlist_names(user_id)
-    if not _playlist:
-        try:
-            return await message.reply(_["playlist_3"], quote=True)
-        except Exception:
-            return
-
-    chat_id = message.chat.id
-    user_name = message.from_user.first_name
-
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-    result = list(_playlist)
-    video = True if mode == "v" else None
-    mystic = await message.reply_text(_["play_1"])
-
-    try:
-        await stream(
-            _,
-            mystic,
-            user_id,
-            result,
-            chat_id,
-            user_name,
-            message.chat.id,
-            video,
-            streamtype="playlist",
-        )
-    except Exception as e:
-        ex_type = type(e).__name__
-        err = e if ex_type == "AssistantErr" else _["general_3"].format(ex_type)
-        return await mystic.edit_text(err)
-
-    return await mystic.delete()
+# Open Autoplay configuration right from Now Playing card
+@app.on_callback_query(filters.regex(r"^open_autoplay_card\|") & ~BANNED_USERS)
+async def open_autoplay_modal(client, CallbackQuery):
+    caption = (
+        "<blockquote><emoji id=5895705279416241926>🎲</emoji> <u><b>AUTOPLAY & MOOD CONFIG</b></u></blockquote>\n\n"
+        "<blockquote expandable>"
+        "<emoji id=5974235702701853774>✨</emoji> Select preferred mood for automatic continuous streaming:\n"
+        "<emoji id=5409132617750555920>⚡</emoji> Bot streams related tracks when queue ends.</blockquote>"
+    )
+    blocks = rich_autoplay_mood_blocks(caption)
+    await deliver_rich(client, CallbackQuery.message.chat.id, blocks)
+    await CallbackQuery.answer()
 
 
 @app.on_callback_query(filters.regex(r"^add_playlist\|") & ~BANNED_USERS)
@@ -357,7 +343,7 @@ async def add_playlist_cmd(client, message: Message, _):
         title, duration_min, _, _, _ = await YouTube.details(videoid, True)
         title = (title[:50]).title()
         plist = {
-            "videoid": vidid,
+            "videoid": videoid,
             "title": title,
             "duration": duration_min,
         }
