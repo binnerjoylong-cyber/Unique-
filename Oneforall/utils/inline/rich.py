@@ -1,5 +1,6 @@
 import math
 import os
+import random
 import re
 import aiohttp
 from pyrogram import enums, errors, types
@@ -13,6 +14,7 @@ _TAG_RE = re.compile(
     re.IGNORECASE,
 )
 _consumed = set()
+_FORBIDDEN = (errors.ChatSendPhotosForbidden, errors.ChatSendMediaForbidden)
 
 
 async def _lang(chat_id):
@@ -177,23 +179,25 @@ def _progress_line(played, dur):
     return f"{current_p}  {bar}  {current_d}"
 
 
-def _progress_row(played, dur):
+def _progress_row(played, dur, style=enums.ButtonStyle.DANGER):
     return types.InputRichBlockButtons(
         buttons=[
             types.RichMessageButton(
                 text=_progress_line(played, dur),
-                style=enums.ButtonStyle.DANGER,
+                style=style,
                 callback_data="GetTimer",
             )
         ]
     )
 
 
-# Now Playing Controls (Added Playlist Button Here)
-def _control_rows(chat_id, playing=True):
+def _queue_len(chat_id):
     tracks = db.get(chat_id)
-    q_len = max(len(tracks) - 1, 0) if tracks else 0
+    return max(len(tracks) - 1, 0) if tracks else 0
 
+
+def _control_rows(chat_id, playing=True):
+    q_len = _queue_len(chat_id)
     toggle = (
         types.RichMessageButton(
             text="II Pause",
@@ -240,7 +244,234 @@ def _control_rows(chat_id, playing=True):
     ]
 
 
-# Autoplay Mood Selection Rich Buttons
+async def _download_photo_if_url(photo):
+    if not photo or not isinstance(photo, str):
+        return None
+    if photo.startswith("http://") or photo.startswith("https://"):
+        os.makedirs("cache", exist_ok=True)
+        local_path = os.path.join("cache", f"thumb_{abs(hash(photo))}.jpg")
+        if os.path.isfile(local_path) and os.path.getsize(local_path) > 0:
+            return local_path
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(photo, timeout=5) as resp:
+                    if resp.status == 200:
+                        with open(local_path, "wb") as f:
+                            f.write(await resp.read())
+                        return local_path
+        except Exception:
+            return None
+    if os.path.isfile(photo) and os.path.getsize(photo) > 0:
+        return photo
+    return None
+
+
+def _format_photo_block(photo):
+    if not photo:
+        return None
+    try:
+        return types.InputRichBlockPhoto(photo=types.InputMediaPhoto(str(photo)))
+    except Exception:
+        try:
+            return types.InputRichBlockPhoto(photo=types.InputMediaPhoto(media=str(photo)))
+        except Exception:
+            return None
+
+
+def build_now_playing_blocks(
+    _, photo, caption_html, chat_id, played=None, dur=None, playing=True
+):
+    blocks = []
+    p_block = _format_photo_block(photo)
+    if p_block:
+        blocks.append(p_block)
+
+    blocks += html_to_rich_blocks(caption_html)
+
+    if not dur and db.get(chat_id):
+        dur = db[chat_id][0].get("dur")
+
+    cur_played = played if played else "00:00"
+    cur_dur = dur if dur else "00:00"
+
+    blocks.append(_progress_row(cur_played, cur_dur))
+    blocks += _control_rows(chat_id, playing)
+    return blocks
+
+
+def _message_key(message):
+    return (message.chat.id, message.id)
+
+
+def _strip_photo(blocks):
+    return [b for b in blocks if not isinstance(b, types.InputRichBlockPhoto)]
+
+
+async def _try_deliver(client, target_chat_id, blocks, replace):
+    rich = types.InputRichMessage(blocks=blocks)
+    if replace is not None:
+        try:
+            edited = await replace.edit_text(rich_message=rich)
+        except _FORBIDDEN:
+            raise
+        except Exception:
+            try:
+                await replace.delete()
+            except Exception:
+                pass
+        else:
+            _consumed.add(_message_key(replace))
+            return edited or replace
+    return await client.send_rich_message(target_chat_id, rich_message=rich)
+
+
+async def _deliver(client, target_chat_id, blocks, replace=None):
+    try:
+        return await _try_deliver(client, target_chat_id, blocks, replace)
+    except _FORBIDDEN:
+        plain = _strip_photo(blocks)
+        if len(plain) == len(blocks):
+            raise
+        return await _try_deliver(client, target_chat_id, plain, replace)
+    except Exception:
+        plain = _strip_photo(blocks)
+        return await _try_deliver(client, target_chat_id, plain, replace)
+
+
+async def _edit_rich(message, blocks):
+    try:
+        return await message.edit_text(
+            rich_message=types.InputRichMessage(blocks=blocks)
+        )
+    except _FORBIDDEN:
+        plain = _strip_photo(blocks)
+        if len(plain) == len(blocks):
+            raise
+        return await message.edit_text(
+            rich_message=types.InputRichMessage(blocks=plain)
+        )
+    except Exception:
+        plain = _strip_photo(blocks)
+        return await message.edit_text(
+            rich_message=types.InputRichMessage(blocks=plain)
+        )
+
+
+def caption_blocks(caption_html):
+    return html_to_rich_blocks(caption_html)
+
+
+async def edit_rich(message, blocks):
+    return await _edit_rich(message, blocks)
+
+
+async def deliver_rich(client, target_chat_id, blocks, replace=None):
+    result = await _deliver(client, target_chat_id, blocks, replace)
+    if replace is not None:
+        _consumed.discard(_message_key(replace))
+    return result
+
+
+async def send_now_playing_rich(
+    client, chat_id, target_chat_id, photo, caption_html, replace=None
+):
+    _ = await _lang(chat_id)
+    local_photo = await _download_photo_if_url(photo)
+    resolved_photo = local_photo or photo
+    dur = db[chat_id][0].get("dur") if db.get(chat_id) else None
+    blocks = build_now_playing_blocks(_, resolved_photo, caption_html, chat_id, played="00:00", dur=dur, playing=True)
+    msg = await _deliver(client, target_chat_id, blocks, replace)
+    if db.get(chat_id):
+        db[chat_id][0]["np_photo"] = resolved_photo
+        db[chat_id][0]["np_caption"] = caption_html
+    return msg
+
+
+def build_queue_blocks(_, caption_html, chat_id, qid):
+    blocks = html_to_rich_blocks(caption_html)
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="▷ Play Now",
+                    style=enums.ButtonStyle.SUCCESS,
+                    callback_data=f"ADMIN PlayNow|{chat_id}_{qid}",
+                ),
+            ]
+        )
+    )
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="» Skip",
+                    style=enums.ButtonStyle.PRIMARY,
+                    callback_data=f"ADMIN Skip|{chat_id}",
+                ),
+                types.RichMessageButton(
+                    text="⟲ End",
+                    style=enums.ButtonStyle.DANGER,
+                    callback_data=f"ADMIN Stop|{chat_id}",
+                ),
+            ]
+        )
+    )
+    return blocks
+
+
+async def send_queue_rich(
+    client, chat_id, target_chat_id, caption_html, qid, replace=None
+):
+    _ = await _lang(chat_id)
+    blocks = build_queue_blocks(_, caption_html, chat_id, qid)
+    return await _deliver(client, target_chat_id, blocks, replace)
+
+
+async def release_mystic(mystic):
+    if mystic is None:
+        return
+    key = _message_key(mystic)
+    if key in _consumed:
+        _consumed.discard(key)
+        return
+    try:
+        await mystic.delete()
+    except Exception:
+        pass
+
+
+async def update_now_playing_progress(mystic, chat_id, played, dur, playing=True):
+    info = db.get(chat_id)
+    if not info:
+        return None
+    photo = info[0].get("np_photo")
+    caption_html = info[0].get("np_caption")
+    if not photo or not caption_html:
+        return None
+    _ = await _lang(chat_id)
+    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    return await _edit_rich(mystic, blocks)
+
+
+async def set_now_playing_state(chat_id, playing):
+    info = db.get(chat_id)
+    if not info:
+        return None
+    mystic = info[0].get("mystic")
+    photo = info[0].get("np_photo")
+    caption_html = info[0].get("np_caption")
+    if not mystic or not photo or not caption_html:
+        return None
+    played = seconds_to_min(info[0].get("played", 0)) or "00:00"
+    dur = info[0].get("dur")
+    _ = await _lang(chat_id)
+    blocks = build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    try:
+        return await _edit_rich(mystic, blocks)
+    except Exception:
+        return None
+
+
 def rich_autoplay_mood_blocks(caption_html: str):
     blocks = html_to_rich_blocks(caption_html)
     blocks.append(
@@ -289,7 +520,6 @@ def rich_autoplay_mood_blocks(caption_html: str):
     return blocks
 
 
-# Autoplay Language Selection Rich Buttons
 def rich_autoplay_language_blocks(caption_html: str):
     blocks = html_to_rich_blocks(caption_html)
     blocks.append(
@@ -325,93 +555,3 @@ def rich_autoplay_language_blocks(caption_html: str):
         )
     )
     return blocks
-
-
-async def _download_photo_if_url(photo):
-    if not photo or not isinstance(photo, str):
-        return None
-    if photo.startswith("http://") or photo.startswith("https://"):
-        os.makedirs("cache", exist_ok=True)
-        local_path = os.path.join("cache", f"thumb_{abs(hash(photo))}.jpg")
-        if os.path.isfile(local_path) and os.path.getsize(local_path) > 0:
-            return local_path
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(photo, timeout=5) as resp:
-                    if resp.status == 200:
-                        with open(local_path, "wb") as f:
-                            f.write(await resp.read())
-                        return local_path
-        except Exception:
-            return None
-    if os.path.isfile(photo) and os.path.getsize(photo) > 0:
-        return photo
-    return None
-
-
-async def build_now_playing_blocks(_, photo, caption_html, chat_id, played=None, dur=None, playing=True):
-    blocks = []
-    local_photo = await _download_photo_if_url(photo)
-    if local_photo and os.path.isfile(str(local_photo)):
-        try:
-            blocks.append(types.InputRichBlockPhoto(photo=types.InputMediaPhoto(str(local_photo))))
-        except Exception:
-            try:
-                blocks.append(types.InputRichBlockPhoto(photo=types.InputMediaPhoto(media=str(local_photo))))
-            except Exception:
-                pass
-
-    blocks += html_to_rich_blocks(caption_html)
-    if not dur and db.get(chat_id):
-        dur = db[chat_id][0].get("dur")
-    cur_played = played if played else "00:00"
-    cur_dur = dur if dur else "00:00"
-
-    blocks.append(_progress_row(cur_played, cur_dur))
-    blocks += _control_rows(chat_id, playing)
-    return blocks
-
-
-def _strip_photo(blocks):
-    return [b for b in blocks if not isinstance(b, types.InputRichBlockPhoto)]
-
-
-async def _try_deliver(client, target_chat_id, blocks, replace):
-    rich = types.InputRichMessage(blocks=blocks)
-    if replace is not None:
-        try:
-            edited = await replace.edit_text(rich_message=rich)
-            return edited or replace
-        except Exception:
-            try:
-                await replace.delete()
-            except Exception:
-                pass
-    return await client.send_rich_message(target_chat_id, rich_message=rich)
-
-
-async def deliver_rich(client, target_chat_id, blocks, replace=None):
-    try:
-        return await _try_deliver(client, target_chat_id, blocks, replace)
-    except Exception:
-        plain = _strip_photo(blocks)
-        return await _try_deliver(client, target_chat_id, plain, replace)
-
-
-async def edit_rich(message, blocks):
-    try:
-        return await message.edit_text(rich_message=types.InputRichMessage(blocks=blocks))
-    except Exception:
-        plain = _strip_photo(blocks)
-        return await message.edit_text(rich_message=types.InputRichMessage(blocks=plain))
-
-
-async def send_now_playing_rich(client, chat_id, target_chat_id, photo, caption_html, replace=None):
-    _ = await _lang(chat_id)
-    dur = db[chat_id][0].get("dur") if db.get(chat_id) else None
-    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played="00:00", dur=dur)
-    msg = await deliver_rich(client, target_chat_id, blocks, replace)
-    if db.get(chat_id):
-        db[chat_id][0]["np_photo"] = photo
-        db[chat_id][0]["np_caption"] = caption_html
-    return msg
