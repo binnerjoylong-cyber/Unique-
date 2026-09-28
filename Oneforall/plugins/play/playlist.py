@@ -6,13 +6,13 @@ from time import time
 from typing import Dict, List, Union
 
 import requests
-from pykeyboard import InlineKeyboard
 from pyrogram import enums, filters, types
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.types import Message
 from youtube_search import YoutubeSearch
 
 from config import BANNED_USERS, SERVER_PLAYLIST_LIMIT
 from Oneforall import Carbon, app
+from Oneforall.core.mongo import mongodb
 from Oneforall.misc import db
 from Oneforall.utils.decorators.language import language, languageCB
 from Oneforall.utils.inline.playlist import (
@@ -28,18 +28,18 @@ from Oneforall.utils.inline.rich import (
 from Oneforall.utils.pastebin import HottyBin
 from Oneforall.utils.stream.stream import stream
 
-# Define a dictionary to track the last message timestamp for each user
+playlistdb = mongodb.playlist
 user_last_message_time = {}
 user_command_count = {}
 SPAM_THRESHOLD = 2
 SPAM_WINDOW_SECONDS = 5
-from Oneforall.core.mongo import mongodb
 
-playlistdb = mongodb.playlist
-playlist = []
+ADDPLAYLIST_COMMAND = "addplaylist"
+PLAYLIST_COMMAND = "playlist"
+DELETEPLAYLIST_COMMAND = "delplaylist"
+DELETE_ALL_PLAYLIST_COMMAND = "delallplaylist"
 
 
-# Playlist Database Helpers
 async def _get_playlists(chat_id: int) -> Dict[str, int]:
     _notes = await playlistdb.find_one({"chat_id": chat_id})
     if not _notes:
@@ -78,9 +78,44 @@ async def delete_playlist(chat_id: int, name: str) -> bool:
     return False
 
 
-ADDPLAYLIST_COMMAND = "addplaylist"
-PLAYLIST_COMMAND = "playlist"
-DELETEPLAYLIST_COMMAND = "delplaylist"
+async def get_rich_del_blocks(_, user_id):
+    _playlist = await get_playlist_names(user_id)
+    count = len(_playlist)
+    blocks = []
+    
+    # 5 tracks per row maximum or 1 per row for long titles
+    for x in _playlist[:15]:
+        _note = await get_playlist(user_id, x)
+        title = _note["title"].title() if _note else str(x)
+        blocks.append(
+            types.InputRichBlockButtons(
+                buttons=[
+                    types.RichMessageButton(
+                        text=f"🗑️ {title[:28]}",
+                        style=enums.ButtonStyle.PRIMARY,
+                        callback_data=f"del_playlist {x}",
+                    )
+                ]
+            )
+        )
+    
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="⚠️ Delete All",
+                    style=enums.ButtonStyle.DANGER,
+                    callback_data="delete_warning",
+                ),
+                types.RichMessageButton(
+                    text="✖ Close",
+                    style=enums.ButtonStyle.DEFAULT,
+                    callback_data="close",
+                ),
+            ]
+        )
+    )
+    return blocks, count
 
 
 @app.on_message(filters.command(PLAYLIST_COMMAND) & ~BANNED_USERS)
@@ -104,73 +139,68 @@ async def check_playlist(client, message: Message, _):
         user_command_count[user_id] = 1
         user_last_message_time[user_id] = current_time
 
-    _playlist = await get_playlist_names(message.from_user.id)
+    _playlist = await get_playlist_names(user_id)
     if not _playlist:
         return await message.reply_text(_["playlist_3"])
 
     caption = (
         "<blockquote><emoji id=5895705279416241926>📑</emoji> <u><b>YOUR SAVED PLAYLIST</b></u></blockquote>\n\n"
         "<blockquote expandable>"
-        f"<emoji id=6066395745139824604>👤</emoji> <b>User:</b> {message.from_user.mention}\n"
-        f"📊 <b>Total Saved:</b> <code>{len(_playlist)} tracks</code>\n\n"
-        "<emoji id=5409132617750555920>⚡</emoji> Choose play mode below to stream directly:</blockquote>"
+        f"<emoji id=6066395745139824604>👤</emoji> <b>User :</b> {message.from_user.mention}\n"
+        f"📊 <b>Total Saved :</b> <code>{len(_playlist)} tracks</code>\n\n"
+        "<emoji id=5409132617750555920>⚡</emoji> Choose an option below to stream directly:</blockquote>"
     )
-
     blocks = html_to_rich_blocks(caption)
     blocks += get_playlist_markup(_)
     await deliver_rich(client, message.chat.id, blocks)
-
-
-async def get_keyboard(_, user_id):
-    keyboard = InlineKeyboard(row_width=5)
-    _playlist = await get_playlist_names(user_id)
-    count = len(_playlist)
-    for x in _playlist:
-        _note = await get_playlist(user_id, x)
-        title = _note["title"].title() if _note else str(x)
-        keyboard.row(
-            InlineKeyboardButton(
-                text=title,
-                callback_data=f"del_playlist {x}",
-            )
-        )
-    keyboard.row(
-        InlineKeyboardButton(
-            text=_["PL_B_5"],
-            callback_data="delete_warning",
-        ),
-        InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data="close"),
-    )
-    return keyboard, count
 
 
 @app.on_message(filters.command(DELETEPLAYLIST_COMMAND) & ~BANNED_USERS)
 @language
 async def del_plist_msg(client, message: Message, _):
     user_id = message.from_user.id
-    current_time = time()
-    last_message_time = user_last_message_time.get(user_id, 0)
-
-    if current_time - last_message_time < SPAM_WINDOW_SECONDS:
-        user_last_message_time[user_id] = current_time
-        user_command_count[user_id] = user_command_count.get(user_id, 0) + 1
-        if user_command_count[user_id] > SPAM_THRESHOLD:
-            hu = await message.reply_text(
-                f"**{message.from_user.mention} ᴘʟᴇᴀsᴇ ᴅᴏɴᴛ ᴅᴏ sᴘᴀᴍ, ᴀɴᴅ ᴛʀʏ ᴀɢᴀɪɴ ᴀғᴛᴇʀ 5 sᴇᴄ**"
-            )
-            await asyncio.sleep(3)
-            await hu.delete()
-            return
-    else:
-        user_command_count[user_id] = 1
-        user_last_message_time[user_id] = current_time
-
-    _playlist = await get_playlist_names(message.from_user.id)
+    _playlist = await get_playlist_names(user_id)
     if not _playlist:
         return await message.reply_text(_["playlist_3"])
 
-    keyboard, count = await get_keyboard(_, message.from_user.id)
-    await message.reply_text(_["playlist_7"].format(count), reply_markup=keyboard)
+    del_buttons, count = await get_rich_del_blocks(_, user_id)
+    caption = (
+        "<blockquote><emoji id=5895705279416241926>🗑️</emoji> <u><b>MANAGE & REMOVE TRACKS</b></u></blockquote>\n\n"
+        "<blockquote expandable>"
+        f"Total <b>{count}</b> tracks in your playlist.\n"
+        "Click on any track button to remove it individually.</blockquote>"
+    )
+    blocks = html_to_rich_blocks(caption)
+    blocks += del_buttons
+    await deliver_rich(client, message.chat.id, blocks)
+
+
+@app.on_callback_query(filters.regex(r"^del_playlist\s+") & ~BANNED_USERS)
+@languageCB
+async def del_plist_cb(client, CallbackQuery, _):
+    videoid = CallbackQuery.data.split(None, 1)[1]
+    user_id = CallbackQuery.from_user.id
+    deleted = await delete_playlist(user_id, videoid)
+    if deleted:
+        await CallbackQuery.answer(_["playlist_11"], show_alert=True)
+    else:
+        return await CallbackQuery.answer(_["playlist_12"], show_alert=True)
+
+    del_buttons, count = await get_rich_del_blocks(_, user_id)
+    if count == 0:
+        caption = "<blockquote><emoji id=5895705279416241926>✨</emoji> <b>Your playlist is now empty.</b></blockquote>"
+        blocks = html_to_rich_blocks(caption)
+        return await edit_rich(CallbackQuery.message, blocks)
+
+    caption = (
+        "<blockquote><emoji id=5895705279416241926>🗑️</emoji> <u><b>MANAGE & REMOVE TRACKS</b></u></blockquote>\n\n"
+        "<blockquote expandable>"
+        f"Total <b>{count}</b> tracks in your playlist.\n"
+        "Click on any track button to remove it individually.</blockquote>"
+    )
+    blocks = html_to_rich_blocks(caption)
+    blocks += del_buttons
+    await edit_rich(CallbackQuery.message, blocks)
 
 
 @app.on_callback_query(filters.regex("play_playlist") & ~BANNED_USERS)
@@ -263,7 +293,6 @@ async def play_playlist_command(client, message, _):
     return await mystic.delete()
 
 
-# Now Playing Card se '➕ Playlist' button handle karne ka logic
 @app.on_callback_query(filters.regex(r"^add_playlist\|") & ~BANNED_USERS)
 @languageCB
 async def add_current_playing_to_playlist(client, CallbackQuery, _):
@@ -287,13 +316,11 @@ async def add_current_playing_to_playlist(client, CallbackQuery, _):
 
     _check = await get_playlist(user_id, vidid)
     if _check:
-        return await CallbackQuery.answer("⚠️ This track is already in your playlist!", show_alert=True)
+        return await CallbackQuery.answer("⚠️ Already in your playlist!", show_alert=True)
 
     _count = await get_playlist_names(user_id)
     if len(_count) >= SERVER_PLAYLIST_LIMIT:
-        return await CallbackQuery.answer(
-            _["playlist_9"].format(SERVER_PLAYLIST_LIMIT), show_alert=True
-        )
+        return await CallbackQuery.answer(_["playlist_9"].format(SERVER_PLAYLIST_LIMIT), show_alert=True)
 
     plist = {
         "videoid": vidid,
@@ -330,7 +357,7 @@ async def add_playlist_cmd(client, message: Message, _):
         title, duration_min, _, _, _ = await YouTube.details(videoid, True)
         title = (title[:50]).title()
         plist = {
-            "videoid": videoid,
+            "videoid": vidid,
             "title": title,
             "duration": duration_min,
         }
@@ -340,9 +367,9 @@ async def add_playlist_cmd(client, message: Message, _):
         caption = (
             "<blockquote><emoji id=5895705279416241926>✅</emoji> <u><b>ADDED TO PLAYLIST</b></u></blockquote>\n\n"
             "<blockquote expandable>"
-            f"🎵 <b>Track:</b> {title}\n"
-            f"⏱️ <b>Duration:</b> {duration_min}\n\n"
-            "Use <code>/playlist</code> to manage or <code>/play</code> in group!</blockquote>"
+            f"🎵 <b>Track :</b> {title}\n"
+            f"⏱️ <b>Duration :</b> {duration_min}\n\n"
+            "Use <code>/playlist</code> to view or <code>/play</code> in group!</blockquote>"
         )
         blocks = html_to_rich_blocks(caption)
         blocks += get_playlist_markup(_)
