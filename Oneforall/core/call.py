@@ -32,6 +32,9 @@ from Oneforall.utils.stream.autoclear import auto_clean
 from Oneforall.utils.thumbnails import get_thumb
 from strings import get_string
 
+# Autoplay imports & helper
+from Oneforall.plugins.misc.autoplay import is_autoplay_on, get_autoplay_mood, get_autoplay_recommendation
+
 autoend = {}
 counter = {}
 loop = asyncio.get_event_loop_policy().get_event_loop()
@@ -349,10 +352,43 @@ class Call(PyTgCalls):
                 loop = loop - 1
                 await set_loop(chat_id, loop)
             await auto_clean(popped)
+
+            # --- AUTOPLAY CHECK BEFORE LEAVING CALL ---
             if not check:
-                await _clear_(chat_id)
-                return await client.leave_group_call(chat_id)
-        except:
+                if await is_autoplay_on(chat_id):
+                    track_data, track_id = await get_autoplay_recommendation(chat_id)
+                    if track_data and track_id:
+                        mood_info = await get_autoplay_mood(chat_id)
+                        m_tag = mood_info.get("mood", "chill").title()
+                        l_tag = mood_info.get("language", "hindi").title()
+                        auto_requester = f"Autoplay [{m_tag} | {l_tag}]"
+
+                        title = track_data.get("title")
+                        dur_sec = track_data.get("duration_sec", 0)
+                        duration = seconds_to_min(dur_sec) or "03:00"
+
+                        # Put autoplay track directly in db queue
+                        db[chat_id] = [
+                            {
+                                "title": title,
+                                "dur": duration,
+                                "streamtype": "audio",
+                                "by": auto_requester,
+                                "chat_id": chat_id,
+                                "file": f"vid_{track_id}",
+                                "vidid": track_id,
+                                "seconds": dur_sec,
+                                "played": 0,
+                            }
+                        ]
+                        check = db.get(chat_id)
+                    else:
+                        await _clear_(chat_id)
+                        return await client.leave_group_call(chat_id)
+                else:
+                    await _clear_(chat_id)
+                    return await client.leave_group_call(chat_id)
+        except Exception as e:
             try:
                 await _clear_(chat_id)
                 return await client.leave_group_call(chat_id)
