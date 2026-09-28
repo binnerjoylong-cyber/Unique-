@@ -350,26 +350,68 @@ class Call(PyTgCalls):
                 await set_loop(chat_id, loop)
             await auto_clean(popped)
 
-            # --- AUTOPLAY CHECK (SAFE LOCAL IMPORT TO PREVENT CIRCULAR LOOP) ---
+            # --- AUTOPLAY CHECK (CONTINUOUS QUEUE & DEDICATED RICH CARD) ---
             if not check:
                 try:
+                    from pyrogram import enums, types
                     from Oneforall.plugins.misc.autoplay import (
                         is_autoplay_on,
                         get_autoplay_mood,
                         get_autoplay_recommendation,
+                    )
+                    from Oneforall.utils.inline.rich import (
+                        deliver_rich,
+                        html_to_rich_blocks,
                     )
 
                     if await is_autoplay_on(chat_id):
                         track_data, track_id = await get_autoplay_recommendation(chat_id)
                         if track_data and track_id:
                             mood_info = await get_autoplay_mood(chat_id)
-                            m_tag = mood_info.get("mood", "chill").title()
+                            m_tag = mood_info.get("mood", "sad").title()
                             l_tag = mood_info.get("language", "hindi").title()
                             auto_requester = f"Autoplay [{m_tag} | {l_tag}]"
 
                             title = track_data.get("title")
                             dur_sec = track_data.get("duration_sec", 0)
                             duration = seconds_to_min(dur_sec) or "03:00"
+
+                            # Purana autoplay card clean karna
+                            prev_auto_msg = getattr(self, f"_auto_msg_{chat_id}", None)
+                            if prev_auto_msg:
+                                try:
+                                    await prev_auto_msg.delete()
+                                except Exception:
+                                    pass
+
+                            # Naya Autoplay Info Card bhejna
+                            caption = (
+                                "<blockquote><emoji id=5895705279416241926>🎲</emoji> <u><b>AUTOPLAY STREAMING</b></u></blockquote>\n\n"
+                                "<blockquote expandable>"
+                                f"🎵 <b>Track:</b> {title[:40]}\n"
+                                f"⏱️ <b>Duration:</b> {duration}\n"
+                                f"✨ <b>Vibe:</b> <code>{m_tag}</code> | <b>Language:</b> <code>{l_tag}</code>\n"
+                                f"🤖 <b>Requested By:</b> <code>Autoplay Engine</code></blockquote>"
+                            )
+                            blocks = html_to_rich_blocks(caption)
+                            blocks.append(
+                                types.InputRichBlockButtons(
+                                    buttons=[
+                                        types.RichMessageButton(
+                                            text="» Skip",
+                                            style=enums.ButtonStyle.PRIMARY,
+                                            callback_data=f"ADMIN Skip|{chat_id}",
+                                        ),
+                                        types.RichMessageButton(
+                                            text="❌ Disable Autoplay",
+                                            style=enums.ButtonStyle.DANGER,
+                                            callback_data=f"AutoPlay|{chat_id}",
+                                        ),
+                                    ]
+                                )
+                            )
+                            auto_msg = await deliver_rich(app, chat_id, blocks)
+                            setattr(self, f"_auto_msg_{chat_id}", auto_msg)
 
                             db[chat_id] = [
                                 {
