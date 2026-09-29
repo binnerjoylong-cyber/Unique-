@@ -196,7 +196,6 @@ async def check_playlist(client, message: Message, _):
     )
     blocks = html_to_rich_blocks(caption)
 
-    # Dedicated Audio / Video stream buttons linking target user
     blocks.append(
         types.InputRichBlockButtons(
             buttons=[
@@ -234,12 +233,12 @@ async def stream_user_playlist_callback(client, CallbackQuery):
     mode = parts[1]
     target_user_id = int(parts[2])
 
-    _playlist = await get_playlist_names(target_user_id)
-    if not _playlist:
+    notes = await _get_playlists(target_user_id)
+    if not notes:
         return await CallbackQuery.answer("❌ Playlist is empty!", show_alert=True)
 
     chat_id = CallbackQuery.message.chat.id
-    user_name = CallbackQuery.from_user.first_name
+    user_name = CallbackQuery.from_user.first_name or "User"
 
     try:
         await CallbackQuery.answer("▶️ Starting Playlist Stream...", show_alert=False)
@@ -254,7 +253,9 @@ async def stream_user_playlist_callback(client, CallbackQuery):
     video = True if mode == "v" else None
     mystic = await client.send_message(chat_id, "🔄 **Fetching playlist & starting stream...**")
 
-    result = list(_playlist)
+    # Pass clean videoids list
+    result = [str(k).strip() for k in notes.keys()]
+
     try:
         _ = await _lang(chat_id)
         await stream(
@@ -369,14 +370,15 @@ async def add_current_playing_to_playlist(client, CallbackQuery, _):
         return await CallbackQuery.answer("❌ Currently no track is streaming.", show_alert=True)
 
     current_track = tracks[0]
-    vidid = current_track.get("vidid")
+    raw_vid = current_track.get("vidid") or current_track.get("file", "")
+    clean_vid = str(raw_vid).replace("vid_", "").strip()
     title = current_track.get("title", "Unknown Track")
     duration = current_track.get("dur", "00:00")
 
-    if not vidid:
+    if not clean_vid:
         return await CallbackQuery.answer("❌ Track ID not found.", show_alert=True)
 
-    _check = await get_playlist(user_id, vidid)
+    _check = await get_playlist(user_id, clean_vid)
     if _check:
         return await CallbackQuery.answer("⚠️ Already in your playlist!", show_alert=True)
 
@@ -385,11 +387,11 @@ async def add_current_playing_to_playlist(client, CallbackQuery, _):
         return await CallbackQuery.answer(_["playlist_9"].format(SERVER_PLAYLIST_LIMIT), show_alert=True)
 
     plist = {
-        "videoid": vidid,
+        "videoid": clean_vid,
         "title": title,
         "duration": duration,
     }
-    await save_playlist(user_id, vidid, plist)
+    await save_playlist(user_id, clean_vid, plist)
     await CallbackQuery.answer(f"✅ Added to playlist:\n{title[:30]}...", show_alert=True)
 
 
@@ -446,7 +448,7 @@ async def delete_all_playlists(client, message, _):
     user_id = message.from_user.id
     _playlist = await get_playlist_names(user_id)
     if _playlist:
-        caption = "<blockquote>⚠️ <b>Are you sure you want to delete entire playlist?</b></blockquote>"
+        caption = "<blockquote>⚠️️ <b>Are you sure you want to delete entire playlist?</b></blockquote>"
         blocks = html_to_rich_blocks(caption)
         blocks += warning_markup(_)
         await deliver_rich(client, message.chat.id, blocks)
