@@ -99,7 +99,7 @@ async def del_back_playlist(client, CallbackQuery, _):
                 if current["file"] != exists["file"]:
                     return await CallbackQuery.edit_message.text(_["admin_35"])
             except:
-                return await CallbackQuery.edit_message.text(_["admin_36"])
+                return await CallbackQuery.edit_message_text(_["admin_36"])
             try:
                 await CallbackQuery.edit_message_text(_["admin_37"].format(upvote))
             except:
@@ -325,7 +325,7 @@ async def del_back_playlist(client, CallbackQuery, _):
         user = check[0]["by"]
         duration = check[0]["dur"]
         streamtype = check[0]["streamtype"]
-        videoid = check[0]["vidid"]
+        videoid = str(check[0]["vidid"]).replace("vid_", "").strip()
         status = True if str(streamtype) == "video" else None
         db[chat_id][0]["played"] = 0
         exis = (check[0]).get("old_dur")
@@ -367,13 +367,14 @@ async def del_back_playlist(client, CallbackQuery, _):
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
 
-        elif "vid_" in queued:
+        elif "vid_" in queued or len(videoid) == 11:
+            clean_vid = videoid if len(videoid) == 11 else str(queued).replace("vid_", "").strip()
             mystic = await CallbackQuery.message.reply_text(
                 _["call_7"], disable_web_page_preview=True
             )
             try:
                 file_path, direct = await YouTube.download(
-                    videoid,
+                    clean_vid,
                     mystic,
                     videoid=True,
                     video=status,
@@ -385,18 +386,18 @@ async def del_back_playlist(client, CallbackQuery, _):
                 return await mystic.edit_text("❌ Download failed: file_path is empty.")
 
             try:
-                image = await YouTube.thumbnail(videoid, True)
+                image = await YouTube.thumbnail(clean_vid, True)
             except:
                 image = None
 
             try:
                 await Hotty.skip_stream(chat_id, file_path, video=status, image=image)
             except Exception as e:
-                return await mystic.edit_text(f"❌ Skip error: {e}")
+                return await mystic.edit_text(f"❌ Skip stream switch error: {e}")
 
-            img = await get_thumb(videoid)
+            img = await get_thumb(clean_vid)
             caption = _["stream_1"].format(
-                f"https://t.me/{app.username}?start=info_{videoid}",
+                f"https://t.me/{app.username}?start=info_{clean_vid}",
                 title[:23],
                 duration,
                 user,
