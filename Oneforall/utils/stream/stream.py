@@ -106,22 +106,42 @@ async def _stream(
         first_song = True
         added_count = 0
         status = True if video else None
-        
+
         for search in result:
             if added_count >= config.PLAYLIST_FETCH_LIMIT:
                 break
+
+            search_str = str(search).strip()
+            is_vid = len(search_str) == 11 and " " not in search_str
+
+            title = "Playlist Track"
+            duration_min = "03:30"
+            duration_sec = 210
+            thumbnail = None
+            vidid = search_str
+
             try:
                 (
-                    title,
-                    duration_min,
-                    duration_sec,
-                    thumbnail,
-                    vidid,
-                ) = await YouTube.details(search, False if spotify else True)
+                    t_title,
+                    t_dur_min,
+                    t_dur_sec,
+                    t_thumb,
+                    t_vidid,
+                ) = await YouTube.details(search_str, videoid=is_vid)
+                if t_vidid:
+                    vidid = t_vidid
+                if t_title:
+                    title = t_title
+                if t_dur_min:
+                    duration_min = str(t_dur_min)
+                if t_dur_sec:
+                    duration_sec = int(t_dur_sec)
+                if t_thumb:
+                    thumbnail = t_thumb
             except Exception:
-                continue
+                pass
 
-            if str(duration_min) == "None" or duration_sec > config.DURATION_LIMIT:
+            if duration_sec and duration_sec > config.DURATION_LIMIT:
                 continue
 
             if await is_active_chat(chat_id):
@@ -141,19 +161,26 @@ async def _stream(
                 if first_song:
                     if not forceplay:
                         db[chat_id] = []
-                    thumb_task = asyncio.ensure_future(get_thumb(vidid))
+
                     try:
                         file_path, direct = await _fetch(_, chat_id, vidid, mystic, video)
-                    except Exception as e:
+                    except Exception:
                         continue
 
-                    await Hotty.join_call(
-                        chat_id,
-                        original_chat_id,
-                        file_path,
-                        video=status,
-                        image=thumbnail,
-                    )
+                    thumb_task = asyncio.ensure_future(get_thumb(vidid))
+                    try:
+                        await Hotty.join_call(
+                            chat_id,
+                            original_chat_id,
+                            file_path,
+                            video=status,
+                            image=thumbnail,
+                        )
+                    except Exception as e:
+                        if mystic:
+                            await mystic.edit_text(f"❌ Assistant failed to join VC: {e}")
+                        return
+
                     await put_queue(
                         chat_id,
                         original_chat_id,
