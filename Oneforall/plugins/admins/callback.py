@@ -99,7 +99,7 @@ async def del_back_playlist(client, CallbackQuery, _):
                 if current["file"] != exists["file"]:
                     return await CallbackQuery.edit_message.text(_["admin_35"])
             except:
-                return await CallbackQuery.edit_message_text(_["admin_36"])
+                return await CallbackQuery.edit_message.text(_["admin_36"])
             try:
                 await CallbackQuery.edit_message_text(_["admin_37"].format(upvote))
             except:
@@ -186,6 +186,14 @@ async def del_back_playlist(client, CallbackQuery, _):
             pass
     elif command == "Skip" or command == "Replay":
         check = db.get(chat_id)
+        if not check:
+            return await CallbackQuery.answer("❌ Queue is empty!", show_alert=True)
+
+        try:
+            await CallbackQuery.answer("⏭️ Skipping to next song...", show_alert=False)
+        except Exception:
+            pass
+
         if command == "Skip":
             txt = (
                 f"➻ ɴᴏᴡ ᴩʟᴀʏɪɴɢ ǫᴜᴇᴜᴇᴅ ᴛʀᴀᴄᴋ 🎄\n│ \n└ʙʏ : {mention} 🥀"
@@ -205,8 +213,6 @@ async def del_back_playlist(client, CallbackQuery, _):
                         get_autoplay_recommendation,
                     )
                     if await is_autoplay_on(chat_id):
-                        await CallbackQuery.answer("🔄 Autoplay: Next track loading...", show_alert=False)
-                        
                         file_path = None
                         track_id = None
                         track_data = None
@@ -247,7 +253,10 @@ async def del_back_playlist(client, CallbackQuery, _):
                             image = None
 
                         await Hotty.skip_stream(chat_id, file_path, video=False, image=image)
-                        await mystic.delete()
+                        try:
+                            await mystic.delete()
+                        except:
+                            pass
 
                         prev_auto_msg = getattr(Hotty, f"_auto_msg_{chat_id}", None)
                         if prev_auto_msg:
@@ -299,9 +308,6 @@ async def del_back_playlist(client, CallbackQuery, _):
                         ]
                         return
                     else:
-                        await CallbackQuery.edit_message_text(
-                            f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
-                        )
                         await CallbackQuery.message.reply_text(
                             text=_["admin_6"].format(
                                 mention, CallbackQuery.message.chat.title
@@ -309,24 +315,11 @@ async def del_back_playlist(client, CallbackQuery, _):
                             reply_markup=close_markup(_),
                         )
                         return await Hotty.stop_stream(chat_id)
-            except Exception:
-                try:
-                    await CallbackQuery.edit_message_text(
-                        f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
-                    )
-                    await CallbackQuery.message.reply_text(
-                        text=_["admin_6"].format(
-                            mention, CallbackQuery.message.chat.title
-                        ),
-                        reply_markup=close_markup(_),
-                    )
-                    return await Hotty.stop_stream(chat_id)
-                except:
-                    return
+            except Exception as e:
+                return await CallbackQuery.message.reply_text(f"Skip Error: {e}")
         else:
             txt = f"➻ sᴛʀᴇᴀᴍ ʀᴇ-ᴘʟᴀʏᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
 
-        await CallbackQuery.answer()
         queued = check[0]["file"]
         title = (check[0]["title"]).title()
         user = check[0]["by"]
@@ -373,10 +366,7 @@ async def del_back_playlist(client, CallbackQuery, _):
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
-            try:
-                await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
-            except:
-                pass
+
         elif "vid_" in queued:
             mystic = await CallbackQuery.message.reply_text(
                 _["call_7"], disable_web_page_preview=True
@@ -388,19 +378,22 @@ async def del_back_playlist(client, CallbackQuery, _):
                     videoid=True,
                     video=status,
                 )
-            except:
-                return await mystic.edit_text(_["call_6"])
+            except Exception as e:
+                return await mystic.edit_text(f"❌ Download error: {e}")
+
+            if not file_path:
+                return await mystic.edit_text("❌ Download failed: file_path is empty.")
+
             try:
                 image = await YouTube.thumbnail(videoid, True)
             except:
                 image = None
-            try:
-                if not file_path:
-                    raise Exception("YT download failed: media_path=None")
 
+            try:
                 await Hotty.skip_stream(chat_id, file_path, video=status, image=image)
-            except:
-                return await mystic.edit_text(_["call_6"])
+            except Exception as e:
+                return await mystic.edit_text(f"❌ Skip error: {e}")
+
             img = await get_thumb(videoid)
             caption = _["stream_1"].format(
                 f"https://t.me/{app.username}?start=info_{videoid}",
@@ -418,10 +411,10 @@ async def del_back_playlist(client, CallbackQuery, _):
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
             try:
-                await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
+                await mystic.delete()
             except:
                 pass
-            await mystic.delete()
+
         elif "index_" in queued:
             try:
                 await Hotty.skip_stream(chat_id, videoid, video=status)
@@ -437,10 +430,7 @@ async def del_back_playlist(client, CallbackQuery, _):
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "tg"
-            try:
-                await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
-            except:
-                pass
+
         else:
             if videoid == "telegram":
                 image = None
@@ -503,10 +493,6 @@ async def del_back_playlist(client, CallbackQuery, _):
                 )
                 db[chat_id][0]["mystic"] = run
                 db[chat_id][0]["markup"] = "stream"
-            try:
-                await CallbackQuery.edit_message_text(txt, reply_markup=close_markup(_))
-            except:
-                pass
 
 
 async def markup_timer():
