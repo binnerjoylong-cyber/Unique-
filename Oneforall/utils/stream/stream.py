@@ -5,15 +5,18 @@ from typing import Union
 from uuid import uuid4
 
 from youtubesearchpython import VideosSearch
+from pyrogram import enums, types
 
 import config
-from Oneforall import Carbon, YouTube, app
+from Oneforall import YouTube, app
 from Oneforall.core.call import Hotty
 from Oneforall.misc import db
 from Oneforall.utils.database import add_active_video_chat, is_active_chat
 from Oneforall.utils.exceptions import AssistantErr
 from Oneforall.utils.inline import close_markup
 from Oneforall.utils.inline.rich import (
+    deliver_rich,
+    html_to_rich_blocks,
     release_mystic,
     send_now_playing_rich,
     send_queue_rich,
@@ -100,11 +103,13 @@ async def _stream(
         await Hotty.force_stop_stream(chat_id)
 
     if streamtype == "playlist":
-        msg = f"{_['play_19']}\n\n"
-        count = 0
+        first_song = True
+        added_count = 0
+        status = True if video else None
+        
         for search in result:
-            if int(count) == config.PLAYLIST_FETCH_LIMIT:
-                continue
+            if added_count >= config.PLAYLIST_FETCH_LIMIT:
+                break
             try:
                 (
                     title,
@@ -115,8 +120,10 @@ async def _stream(
                 ) = await YouTube.details(search, False if spotify else True)
             except Exception:
                 continue
+
             if str(duration_min) == "None" or duration_sec > config.DURATION_LIMIT:
                 continue
+
             if await is_active_chat(chat_id):
                 await put_queue(
                     chat_id,
@@ -129,66 +136,103 @@ async def _stream(
                     user_id,
                     "video" if video else "audio",
                 )
-                position = len(db.get(chat_id)) - 1
-                count += 1
-                msg += f"{count}. {title[:70]}\n"
-                msg += f"{_['play_20']} {position}\n\n"
+                added_count += 1
             else:
-                if not forceplay:
-                    db[chat_id] = []
-                status = True if video else None
-                thumb_task = asyncio.ensure_future(get_thumb(vidid))
-                file_path, direct = await _fetch(_, chat_id, vidid, mystic, video)
-                await Hotty.join_call(
-                    chat_id,
-                    original_chat_id,
-                    file_path,
-                    video=status,
-                    image=thumbnail,
-                )
-                await put_queue(
-                    chat_id,
-                    original_chat_id,
-                    file_path if direct else f"vid_{vidid}",
-                    title,
-                    duration_min,
-                    user_name,
-                    vidid,
-                    user_id,
-                    "video" if video else "audio",
-                    forceplay=forceplay,
-                )
-                img = await thumb_task
-                caption = _["stream_1"].format(
-                    f"https://t.me/{app.username}?start=info_{vidid}",
-                    title[:23],
-                    duration_min,
-                    user_name,
-                )
-                run = await send_now_playing_rich(
-                    app,
-                    chat_id,
-                    original_chat_id,
-                    img,
-                    caption,
-                    replace=mystic,
-                )
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "stream"
-        if count == 0:
+                if first_song:
+                    if not forceplay:
+                        db[chat_id] = []
+                    thumb_task = asyncio.ensure_future(get_thumb(vidid))
+                    try:
+                        file_path, direct = await _fetch(_, chat_id, vidid, mystic, video)
+                    except Exception as e:
+                        continue
+
+                    await Hotty.join_call(
+                        chat_id,
+                        original_chat_id,
+                        file_path,
+                        video=status,
+                        image=thumbnail,
+                    )
+                    await put_queue(
+                        chat_id,
+                        original_chat_id,
+                        file_path if direct else f"vid_{vidid}",
+                        title,
+                        duration_min,
+                        user_name,
+                        vidid,
+                        user_id,
+                        "video" if video else "audio",
+                        forceplay=forceplay,
+                    )
+                    img = await thumb_task
+                    caption = _["stream_1"].format(
+                        f"https://t.me/{app.username}?start=info_{vidid}",
+                        title[:23],
+                        duration_min,
+                        user_name,
+                    )
+                    run = await send_now_playing_rich(
+                        app,
+                        chat_id,
+                        original_chat_id,
+                        img,
+                        caption,
+                        replace=mystic,
+                    )
+                    db[chat_id][0]["mystic"] = run
+                    db[chat_id][0]["markup"] = "stream"
+                    first_song = False
+                    added_count += 1
+                else:
+                    await put_queue(
+                        chat_id,
+                        original_chat_id,
+                        f"vid_{vidid}",
+                        title,
+                        duration_min,
+                        user_name,
+                        vidid,
+                        user_id,
+                        "video" if video else "audio",
+                    )
+                    added_count += 1
+
+        if added_count == 0:
+            if mystic:
+                try:
+                    await mystic.edit_text("❌ No valid songs could be played from this playlist.")
+                except Exception:
+                    pass
             return
-        else:
-            link = "https://bin.roohi.me"
-            lines = msg.count("\n")
-            car = os.linesep.join(msg.split(os.linesep)[:17]) if lines >= 17 else msg
-            carbon = await Carbon.generate(car, randint(100, 10000000))
-            upl = close_markup(_)
-            return await app.send_photo(
-                original_chat_id,
-                photo=carbon,
-                caption=_["play_21"].format(position, link),
-                reply_markup=upl,
+
+        caption = (
+            "<blockquote><emoji id=5895705279416241926>📑</emoji> <u><b>PLAYLIST STREAM STARTED</b></u></blockquote>\n\n"
+            "<blockquote expandable>"
+            f"👤 <b>Playlist Owner:</b> {user_name}\n"
+            f"📊 <b>Total Queued:</b> <code>{added_count} tracks</code>\n"
+            f"🎬 <b>Mode:</b> <code>{'Video' if video else 'Audio'}</code></blockquote>"
+        )
+        blocks = html_to_rich_blocks(caption)
+        blocks.append(
+            types.InputRichBlockButtons(
+                buttons=[
+                    types.RichMessageButton(
+                        text="» Skip",
+                        style=enums.ButtonStyle.PRIMARY,
+                        callback_data=f"ADMIN Skip|{chat_id}",
+                    ),
+                    types.RichMessageButton(
+                        text="⟲ End Playlist",
+                        style=enums.ButtonStyle.DANGER,
+                        callback_data=f"ADMIN Stop|{chat_id}",
+                    ),
+                ]
             )
+        )
+        await deliver_rich(app, original_chat_id, blocks)
+        return
 
     elif streamtype == "youtube":
         link = result["link"]
@@ -426,7 +470,7 @@ async def _stream(
 
     elif streamtype == "index":
         link = result
-        title = "ɪɴᴅᴇx ᴏʀ ᴍ3ᴜ8 ʟɪɴᴋ"
+        title = "Index Stream"
         duration_min = "00:00"
         if await is_active_chat(chat_id):
             await put_queue_index(
