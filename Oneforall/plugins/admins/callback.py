@@ -21,6 +21,7 @@ from Oneforall.misc import SUDOERS, db
 from Oneforall.utils.database import (
     get_active_chats,
     get_upvote_count,
+    group_assistant,
     is_active_chat,
     is_music_playing,
     is_nonadmin_chat,
@@ -91,18 +92,18 @@ async def del_back_playlist(client, CallbackQuery, _):
             try:
                 exists = confirmer[chat_id][CallbackQuery.message.id]
                 current = db[chat_id][0]
-            except:
+            except Exception:
                 return await CallbackQuery.edit_message_text("ғᴀɪʟᴇᴅ.")
             try:
                 if current["vidid"] != exists["vidid"]:
                     return await CallbackQuery.edit_message.text(_["admin_35"])
                 if current["file"] != exists["file"]:
                     return await CallbackQuery.edit_message.text(_["admin_35"])
-            except:
+            except Exception:
                 return await CallbackQuery.edit_message_text(_["admin_36"])
             try:
                 await CallbackQuery.edit_message_text(_["admin_37"].format(upvote))
-            except:
+            except Exception:
                 pass
             command = counter
             mention = "ᴜᴘᴠᴏᴛᴇs"
@@ -182,7 +183,7 @@ async def del_back_playlist(client, CallbackQuery, _):
         )
         try:
             await CallbackQuery.message.delete()
-        except:
+        except Exception:
             pass
     elif command == "Skip" or command == "Replay":
         check = db.get(chat_id)
@@ -195,305 +196,25 @@ async def del_back_playlist(client, CallbackQuery, _):
             pass
 
         if command == "Skip":
-            txt = (
-                f"➻ ɴᴏᴡ ᴩʟᴀʏɪɴɢ ǫᴜᴇᴜᴇᴅ ᴛʀᴀᴄᴋ 🎄\n│ \n└ʙʏ : {mention} 🥀"
-                if play_now
-                else f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
-            )
-            popped = None
             try:
-                popped = check.pop(0)
-                if popped:
-                    await auto_clean(popped)
-
-                if not check:
-                    from Oneforall.plugins.misc.autoplay import (
-                        is_autoplay_on,
-                        get_autoplay_mood,
-                        get_autoplay_recommendation,
-                    )
-                    if await is_autoplay_on(chat_id):
-                        file_path = None
-                        track_id = None
-                        track_data = None
-                        mystic = await CallbackQuery.message.reply_text("🔄 **Finding next playable Autoplay track...**")
-
-                        for _attempt in range(3):
-                            track_data, track_id = await get_autoplay_recommendation(chat_id)
-                            if not track_data or not track_id:
-                                continue
-                            try:
-                                file_path, direct = await YouTube.download(
-                                    track_id,
-                                    mystic,
-                                    videoid=True,
-                                    video=False,
-                                )
-                                if file_path and os.path.isfile(file_path):
-                                    break
-                            except Exception:
-                                file_path = None
-                                continue
-
-                        if not file_path:
-                            await mystic.edit_text("❌ Could not find a playable stream. Stopping.")
-                            return await Hotty.stop_stream(chat_id)
-
-                        mood_info = await get_autoplay_mood(chat_id)
-                        m_tag = mood_info.get("mood", "chill").title()
-                        l_tag = mood_info.get("language", "hindi").title()
-                        auto_requester = f"Autoplay [{m_tag} | {l_tag}]"
-                        title = track_data.get("title", "Autoplay Track")
-                        dur_sec = track_data.get("duration_sec", 0)
-                        duration = seconds_to_min(dur_sec) or "03:00"
-
-                        try:
-                            image = await YouTube.thumbnail(track_id, True)
-                        except:
-                            image = None
-
-                        await Hotty.skip_stream(chat_id, file_path, video=False, image=image)
-                        try:
-                            await mystic.delete()
-                        except:
-                            pass
-
-                        prev_auto_msg = getattr(Hotty, f"_auto_msg_{chat_id}", None)
-                        if prev_auto_msg:
-                            try:
-                                await prev_auto_msg.delete()
-                            except:
-                                pass
-
-                        caption = (
-                            "<blockquote><emoji id=5895705279416241926>🎲</emoji> <u><b>AUTOPLAY STREAMING</b></u></blockquote>\n\n"
-                            "<blockquote expandable>"
-                            f"🎵 <b>Track:</b> {title[:40]}\n"
-                            f"⏱️ <b>Duration:</b> {duration}\n"
-                            f"✨ <b>Vibe:</b> <code>{m_tag}</code> | <b>Language:</b> <code>{l_tag}</code>\n"
-                            f"🤖 <b>Requested By:</b> <code>Autoplay Engine</code></blockquote>"
-                        )
-                        blocks = html_to_rich_blocks(caption)
-                        blocks.append(
-                            types.InputRichBlockButtons(
-                                buttons=[
-                                    types.RichMessageButton(
-                                        text="» Skip",
-                                        style=enums.ButtonStyle.PRIMARY,
-                                        callback_data=f"ADMIN Skip|{chat_id}",
-                                    ),
-                                    types.RichMessageButton(
-                                        text="❌ Disable Autoplay",
-                                        style=enums.ButtonStyle.DANGER,
-                                        callback_data=f"AutoPlay|{chat_id}",
-                                    ),
-                                ]
-                            )
-                        )
-                        auto_msg = await deliver_rich(app, chat_id, blocks)
-                        setattr(Hotty, f"_auto_msg_{chat_id}", auto_msg)
-
-                        db[chat_id] = [
-                            {
-                                "title": title,
-                                "dur": duration,
-                                "streamtype": "audio",
-                                "by": auto_requester,
-                                "chat_id": chat_id,
-                                "file": file_path,
-                                "vidid": track_id,
-                                "seconds": dur_sec,
-                                "played": 0,
-                            }
-                        ]
-                        return
-                    else:
-                        await CallbackQuery.message.reply_text(
-                            text=_["admin_6"].format(
-                                mention, CallbackQuery.message.chat.title
-                            ),
-                            reply_markup=close_markup(_),
-                        )
-                        return await Hotty.stop_stream(chat_id)
+                assistant = await group_assistant(Hotty, chat_id)
+                await Hotty.change_stream(assistant, chat_id)
+                return
             except Exception as e:
-                return await CallbackQuery.message.reply_text(f"Skip Error: {e}")
-        else:
-            txt = f"➻ sᴛʀᴇᴀᴍ ʀᴇ-ᴘʟᴀʏᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
-
-        queued = check[0]["file"]
-        title = (check[0]["title"]).title()
-        user = check[0]["by"]
-        duration = check[0]["dur"]
-        streamtype = check[0]["streamtype"]
-        videoid = str(check[0]["vidid"]).replace("vid_", "").strip()
-        status = True if str(streamtype) == "video" else None
-        db[chat_id][0]["played"] = 0
-        exis = (check[0]).get("old_dur")
-        if exis:
-            db[chat_id][0]["dur"] = exis
-            db[chat_id][0]["seconds"] = check[0]["old_second"]
-            db[chat_id][0]["speed_path"] = None
-            db[chat_id][0]["speed"] = 1.0
-
-        if "live_" in queued:
-            n, link = await YouTube.video(videoid, True)
-            if n == 0:
-                return await CallbackQuery.message.reply_text(
-                    text=_["admin_7"].format(title),
-                    reply_markup=close_markup(_),
-                )
-            try:
-                image = await YouTube.thumbnail(videoid, True)
-            except:
-                image = None
-            try:
-                await Hotty.skip_stream(chat_id, link, video=status, image=image)
-            except:
-                return await CallbackQuery.message.reply_text(_["call_6"])
-            img = await get_thumb(videoid)
-            caption = _["stream_1"].format(
-                f"https://t.me/{app.username}?start=info_{videoid}",
-                title[:23],
-                duration,
-                user,
-            )
-            run = await send_now_playing_rich(
-                app,
-                chat_id,
-                CallbackQuery.message.chat.id,
-                img,
-                caption,
-            )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "tg"
-
-        elif "vid_" in queued or len(videoid) == 11:
-            clean_vid = videoid if len(videoid) == 11 else str(queued).replace("vid_", "").strip()
-            mystic = await CallbackQuery.message.reply_text(
-                _["call_7"], disable_web_page_preview=True
-            )
-            try:
-                file_path, direct = await YouTube.download(
-                    clean_vid,
-                    mystic,
-                    videoid=True,
-                    video=status,
-                )
-            except Exception as e:
-                return await mystic.edit_text(f"❌ Download error: {e}")
-
-            if not file_path:
-                return await mystic.edit_text("❌ Download failed: file_path is empty.")
-
-            try:
-                image = await YouTube.thumbnail(clean_vid, True)
-            except:
-                image = None
-
-            try:
-                await Hotty.skip_stream(chat_id, file_path, video=status, image=image)
-            except Exception as e:
-                return await mystic.edit_text(f"❌ Skip stream switch error: {e}")
-
-            img = await get_thumb(clean_vid)
-            caption = _["stream_1"].format(
-                f"https://t.me/{app.username}?start=info_{clean_vid}",
-                title[:23],
-                duration,
-                user,
-            )
-            run = await send_now_playing_rich(
-                app,
-                chat_id,
-                CallbackQuery.message.chat.id,
-                img,
-                caption,
-            )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "stream"
-            try:
-                await mystic.delete()
-            except:
-                pass
-
-        elif "index_" in queued:
-            try:
-                await Hotty.skip_stream(chat_id, videoid, video=status)
-            except:
-                return await CallbackQuery.message.reply_text(_["call_6"])
-            caption = _["stream_2"].format(user)
-            run = await send_now_playing_rich(
-                app,
-                chat_id,
-                CallbackQuery.message.chat.id,
-                STREAM_IMG_URL,
-                caption,
-            )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "tg"
-
-        else:
-            if videoid == "telegram":
-                image = None
-            elif videoid == "soundcloud":
-                image = None
-            else:
                 try:
-                    image = await YouTube.thumbnail(videoid, True)
-                except:
-                    image = None
+                    await CallbackQuery.message.reply_text(f"❌ Skip Error: {e}")
+                except Exception:
+                    pass
+                return
+        else:
+            queued = check[0]["file"]
+            streamtype = check[0]["streamtype"]
+            status = True if str(streamtype) == "video" else None
             try:
-                await Hotty.skip_stream(chat_id, queued, video=status, image=image)
-            except:
-                return await CallbackQuery.message.reply_text(_["call_6"])
-            if videoid == "telegram":
-                thumb = (
-                    TELEGRAM_AUDIO_URL
-                    if str(streamtype) == "audio"
-                    else TELEGRAM_VIDEO_URL
-                )
-                caption = _["stream_1"].format(
-                    SUPPORT_CHAT, title[:23], duration, user
-                )
-                run = await send_now_playing_rich(
-                    app,
-                    chat_id,
-                    CallbackQuery.message.chat.id,
-                    thumb,
-                    caption,
-                )
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "tg"
-            elif videoid == "soundcloud":
-                caption = _["stream_1"].format(
-                    SUPPORT_CHAT, title[:23], duration, user
-                )
-                run = await send_now_playing_rich(
-                    app,
-                    chat_id,
-                    CallbackQuery.message.chat.id,
-                    SOUNCLOUD_IMG_URL,
-                    caption,
-                )
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "tg"
-            else:
-                img = await get_thumb(videoid)
-                caption = _["stream_1"].format(
-                    f"https://t.me/{app.username}?start=info_{videoid}",
-                    title[:23],
-                    duration,
-                    user,
-                )
-                run = await send_now_playing_rich(
-                    app,
-                    chat_id,
-                    CallbackQuery.message.chat.id,
-                    img,
-                    caption,
-                )
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "stream"
+                await Hotty.skip_stream(chat_id, queued, video=status)
+                return await CallbackQuery.answer("⟲ Replaying track...")
+            except Exception as e:
+                return await CallbackQuery.answer(f"Replay Error: {e}", show_alert=True)
 
 
 async def markup_timer():
@@ -511,13 +232,13 @@ async def markup_timer():
                     continue
                 try:
                     mystic = playing[0]["mystic"]
-                except:
+                except Exception:
                     continue
                 try:
                     check = checker[chat_id][mystic.id]
                     if check is False:
                         continue
-                except:
+                except Exception:
                     pass
                 try:
                     await update_now_playing_progress(
@@ -526,9 +247,9 @@ async def markup_timer():
                         seconds_to_min(playing[0]["played"]),
                         playing[0]["dur"],
                     )
-                except:
+                except Exception:
                     continue
-            except:
+            except Exception:
                 continue
 
 
