@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 from pyrogram import enums, filters, types
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -205,18 +206,16 @@ async def del_back_playlist(client, CallbackQuery, _):
                     )
                     if await is_autoplay_on(chat_id):
                         await CallbackQuery.answer("🔄 Autoplay: Next track loading...", show_alert=False)
-                        track_data, track_id = await get_autoplay_recommendation(chat_id)
-                        if track_data and track_id:
-                            mood_info = await get_autoplay_mood(chat_id)
-                            m_tag = mood_info.get("mood", "romantic").title()
-                            l_tag = mood_info.get("language", "hindi").title()
-                            auto_requester = f"Autoplay [{m_tag} | {l_tag}]"
-                            title = track_data.get("title")
-                            dur_sec = track_data.get("duration_sec", 0)
-                            duration = seconds_to_min(dur_sec) or "03:00"
+                        
+                        file_path = None
+                        track_id = None
+                        track_data = None
+                        mystic = await CallbackQuery.message.reply_text("🔄 **Finding next playable Autoplay track...**")
 
-                            # Download next track immediately
-                            mystic = await CallbackQuery.message.reply_text("🔄 **Downloading next Autoplay track...**")
+                        for _attempt in range(3):
+                            track_data, track_id = await get_autoplay_recommendation(chat_id)
+                            if not track_data or not track_id:
+                                continue
                             try:
                                 file_path, direct = await YouTube.download(
                                     track_id,
@@ -224,72 +223,81 @@ async def del_back_playlist(client, CallbackQuery, _):
                                     videoid=True,
                                     video=False,
                                 )
-                            except Exception as e:
-                                await mystic.edit_text(f"❌ Error downloading autoplay track: {e}")
-                                return await Hotty.stop_stream(chat_id)
+                                if file_path and os.path.isfile(file_path):
+                                    break
+                            except Exception:
+                                file_path = None
+                                continue
 
-                            try:
-                                image = await YouTube.thumbnail(track_id, True)
-                            except:
-                                image = None
-
-                            await Hotty.skip_stream(chat_id, file_path, video=False, image=image)
-                            await mystic.delete()
-
-                            # Clean up old autoplay message card
-                            prev_auto_msg = getattr(Hotty, f"_auto_msg_{chat_id}", None)
-                            if prev_auto_msg:
-                                try:
-                                    await prev_auto_msg.delete()
-                                except:
-                                    pass
-
-                            # Dispatch new dedicated Rich Autoplay Card
-                            caption = (
-                                "<blockquote><emoji id=5895705279416241926>🎲</emoji> <u><b>AUTOPLAY STREAMING</b></u></blockquote>\n\n"
-                                "<blockquote expandable>"
-                                f"🎵 <b>Track:</b> {title[:40]}\n"
-                                f"⏱️ <b>Duration:</b> {duration}\n"
-                                f"✨ <b>Vibe:</b> <code>{m_tag}</code> | <b>Language:</b> <code>{l_tag}</code>\n"
-                                f"🤖 <b>Requested By:</b> <code>Autoplay Engine</code></blockquote>"
-                            )
-                            blocks = html_to_rich_blocks(caption)
-                            blocks.append(
-                                types.InputRichBlockButtons(
-                                    buttons=[
-                                        types.RichMessageButton(
-                                            text="» Skip",
-                                            style=enums.ButtonStyle.PRIMARY,
-                                            callback_data=f"ADMIN Skip|{chat_id}",
-                                        ),
-                                        types.RichMessageButton(
-                                            text="❌ Disable Autoplay",
-                                            style=enums.ButtonStyle.DANGER,
-                                            callback_data=f"AutoPlay|{chat_id}",
-                                        ),
-                                    ]
-                                )
-                            )
-                            auto_msg = await deliver_rich(app, chat_id, blocks)
-                            setattr(Hotty, f"_auto_msg_{chat_id}", auto_msg)
-
-                            db[chat_id] = [
-                                {
-                                    "title": title,
-                                    "dur": duration,
-                                    "streamtype": "audio",
-                                    "by": auto_requester,
-                                    "chat_id": chat_id,
-                                    "file": file_path,
-                                    "vidid": track_id,
-                                    "seconds": dur_sec,
-                                    "played": 0,
-                                }
-                            ]
-                            return
-                        else:
-                            await CallbackQuery.message.reply_text("❌ Autoplay: No songs found.")
+                        if not file_path:
+                            await mystic.edit_text("❌ Could not find a playable stream. Stopping.")
                             return await Hotty.stop_stream(chat_id)
+
+                        mood_info = await get_autoplay_mood(chat_id)
+                        m_tag = mood_info.get("mood", "chill").title()
+                        l_tag = mood_info.get("language", "hindi").title()
+                        auto_requester = f"Autoplay [{m_tag} | {l_tag}]"
+                        title = track_data.get("title", "Autoplay Track")
+                        dur_sec = track_data.get("duration_sec", 0)
+                        duration = seconds_to_min(dur_sec) or "03:00"
+
+                        try:
+                            image = await YouTube.thumbnail(track_id, True)
+                        except:
+                            image = None
+
+                        await Hotty.skip_stream(chat_id, file_path, video=False, image=image)
+                        await mystic.delete()
+
+                        prev_auto_msg = getattr(Hotty, f"_auto_msg_{chat_id}", None)
+                        if prev_auto_msg:
+                            try:
+                                await prev_auto_msg.delete()
+                            except:
+                                pass
+
+                        caption = (
+                            "<blockquote><emoji id=5895705279416241926>🎲</emoji> <u><b>AUTOPLAY STREAMING</b></u></blockquote>\n\n"
+                            "<blockquote expandable>"
+                            f"🎵 <b>Track:</b> {title[:40]}\n"
+                            f"⏱️ <b>Duration:</b> {duration}\n"
+                            f"✨ <b>Vibe:</b> <code>{m_tag}</code> | <b>Language:</b> <code>{l_tag}</code>\n"
+                            f"🤖 <b>Requested By:</b> <code>Autoplay Engine</code></blockquote>"
+                        )
+                        blocks = html_to_rich_blocks(caption)
+                        blocks.append(
+                            types.InputRichBlockButtons(
+                                buttons=[
+                                    types.RichMessageButton(
+                                        text="» Skip",
+                                        style=enums.ButtonStyle.PRIMARY,
+                                        callback_data=f"ADMIN Skip|{chat_id}",
+                                    ),
+                                    types.RichMessageButton(
+                                        text="❌ Disable Autoplay",
+                                        style=enums.ButtonStyle.DANGER,
+                                        callback_data=f"AutoPlay|{chat_id}",
+                                    ),
+                                ]
+                            )
+                        )
+                        auto_msg = await deliver_rich(app, chat_id, blocks)
+                        setattr(Hotty, f"_auto_msg_{chat_id}", auto_msg)
+
+                        db[chat_id] = [
+                            {
+                                "title": title,
+                                "dur": duration,
+                                "streamtype": "audio",
+                                "by": auto_requester,
+                                "chat_id": chat_id,
+                                "file": file_path,
+                                "vidid": track_id,
+                                "seconds": dur_sec,
+                                "played": 0,
+                            }
+                        ]
+                        return
                     else:
                         await CallbackQuery.edit_message_text(
                             f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
