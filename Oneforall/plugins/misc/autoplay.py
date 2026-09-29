@@ -1,5 +1,5 @@
 import random
-from pyrogram import filters, types, enums
+from pyrogram import enums, filters, types
 
 from config import BANNED_USERS, lyrical
 from Oneforall import YouTube, app
@@ -8,9 +8,9 @@ from Oneforall.utils.decorators.language import languageCB
 from Oneforall.utils.inline.rich import (
     deliver_rich,
     edit_rich,
-    rich_autoplay_mood_blocks,
-    rich_autoplay_language_blocks,
     html_to_rich_blocks,
+    rich_autoplay_language_blocks,
+    rich_autoplay_mood_blocks,
     update_now_playing_markup,
 )
 
@@ -122,7 +122,7 @@ async def handle_language_selection(client, CallbackQuery, _):
         show_alert=True,
     )
 
-    # 2. Panel message ko auto-delete kar do taaki chat me bekar na dikhe
+    # 2. Panel message ko auto-delete kar do
     try:
         await CallbackQuery.message.delete()
     except Exception:
@@ -182,12 +182,11 @@ async def toggle_autoplay(client, CallbackQuery, _):
 
 
 async def get_autoplay_recommendation(chat_id: int):
-    """Get autoplay song recommendation"""
+    """Get unique autoplay song recommendation with fallback attempts"""
     if chat_id not in previous_tracks:
         previous_tracks[chat_id] = []
 
     mood_data = await get_autoplay_mood(chat_id)
-
     mood = "chill"
     language = "hindi"
 
@@ -195,35 +194,52 @@ async def get_autoplay_recommendation(chat_id: int):
         mood = mood_data.get("mood", "chill")
         language = mood_data.get("language", "hindi")
 
+    keywords = ["jukebox", "hits", "mashup", "latest tracks", "acoustic", "lofi", "remix", "trending"]
+    random.shuffle(keywords)
+
     search_queries = [
         f"best {language} {mood} songs audio",
-        f"popular {language} {mood} hit songs",
-        f"{language} {mood} mashup latest",
+        f"popular {language} {mood} songs",
+        f"top {language} {mood} {keywords[0]}",
+        f"{language} {mood} song {keywords[1]}",
+        f"new {language} {mood} music",
+        f"{language} hit {mood} audio tracks",
     ]
-    query = random.choice(search_queries)
+    random.shuffle(search_queries)
 
+    used_ids = [x.get("vidid") for x in previous_tracks[chat_id]]
+
+    for query in search_queries:
+        try:
+            track_data, track_id = await YouTube.track(query)
+            if not track_data or not track_id:
+                continue
+
+            if track_id in used_ids:
+                continue
+
+            if len(previous_tracks[chat_id]) >= 20:
+                previous_tracks[chat_id].pop(0)
+
+            previous_tracks[chat_id].append(
+                {
+                    "title": track_data.get("title"),
+                    "vidid": track_id,
+                    "mood": mood,
+                    "language": language,
+                }
+            )
+            return track_data, track_id
+        except Exception:
+            continue
+
+    # Fallback if all queries hit duplicates
     try:
-        track_data, track_id = await YouTube.track(query)
-        if not track_data or not track_id:
-            return None, None
-
-        used_ids = [x.get("vidid") for x in previous_tracks[chat_id]]
-        if track_id in used_ids:
-            return None, None
-
-        if len(previous_tracks[chat_id]) >= 15:
-            previous_tracks[chat_id].pop(0)
-
-        previous_tracks[chat_id].append(
-            {
-                "title": track_data.get("title"),
-                "vidid": track_id,
-                "mood": mood,
-                "language": language,
-            }
-        )
-        return track_data, track_id
-
+        fallback_query = f"{language} {mood} songs"
+        track_data, track_id = await YouTube.track(fallback_query)
+        if track_data and track_id:
+            return track_data, track_id
     except Exception as e:
-        print(f"Autoplay Error: {e}")
-        return None, None
+        print(f"Autoplay Final Fallback Error: {e}")
+
+    return None, None
