@@ -196,8 +196,7 @@ async def del_back_playlist(client, CallbackQuery, _):
                 popped = check.pop(0)
                 if popped:
                     await auto_clean(popped)
-                
-                # Check for Autoplay if Queue is empty on Skip
+
                 if not check:
                     from Oneforall.plugins.misc.autoplay import (
                         is_autoplay_on,
@@ -205,17 +204,39 @@ async def del_back_playlist(client, CallbackQuery, _):
                         get_autoplay_recommendation,
                     )
                     if await is_autoplay_on(chat_id):
+                        await CallbackQuery.answer("🔄 Autoplay: Next track loading...", show_alert=False)
                         track_data, track_id = await get_autoplay_recommendation(chat_id)
                         if track_data and track_id:
                             mood_info = await get_autoplay_mood(chat_id)
-                            m_tag = mood_info.get("mood", "sad").title()
+                            m_tag = mood_info.get("mood", "romantic").title()
                             l_tag = mood_info.get("language", "hindi").title()
                             auto_requester = f"Autoplay [{m_tag} | {l_tag}]"
                             title = track_data.get("title")
                             dur_sec = track_data.get("duration_sec", 0)
                             duration = seconds_to_min(dur_sec) or "03:00"
 
-                            # Clean previous autoplay card if any
+                            # Download next track immediately
+                            mystic = await CallbackQuery.message.reply_text("🔄 **Downloading next Autoplay track...**")
+                            try:
+                                file_path, direct = await YouTube.download(
+                                    track_id,
+                                    mystic,
+                                    videoid=True,
+                                    video=False,
+                                )
+                            except Exception as e:
+                                await mystic.edit_text(f"❌ Error downloading autoplay track: {e}")
+                                return await Hotty.stop_stream(chat_id)
+
+                            try:
+                                image = await YouTube.thumbnail(track_id, True)
+                            except:
+                                image = None
+
+                            await Hotty.skip_stream(chat_id, file_path, video=False, image=image)
+                            await mystic.delete()
+
+                            # Clean up old autoplay message card
                             prev_auto_msg = getattr(Hotty, f"_auto_msg_{chat_id}", None)
                             if prev_auto_msg:
                                 try:
@@ -223,7 +244,7 @@ async def del_back_playlist(client, CallbackQuery, _):
                                 except:
                                     pass
 
-                            # Send new Rich Autoplay Queue card
+                            # Dispatch new dedicated Rich Autoplay Card
                             caption = (
                                 "<blockquote><emoji id=5895705279416241926>🎲</emoji> <u><b>AUTOPLAY STREAMING</b></u></blockquote>\n\n"
                                 "<blockquote expandable>"
@@ -259,26 +280,17 @@ async def del_back_playlist(client, CallbackQuery, _):
                                     "streamtype": "audio",
                                     "by": auto_requester,
                                     "chat_id": chat_id,
-                                    "file": f"vid_{track_id}",
+                                    "file": file_path,
                                     "vidid": track_id,
                                     "seconds": dur_sec,
                                     "played": 0,
                                 }
                             ]
-                            check = db.get(chat_id)
+                            return
                         else:
-                            await CallbackQuery.edit_message_text(
-                                f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
-                            )
-                            await CallbackQuery.message.reply_text(
-                                text=_["admin_6"].format(
-                                    mention, CallbackQuery.message.chat.title
-                                ),
-                                reply_markup=close_markup(_),
-                            )
+                            await CallbackQuery.message.reply_text("❌ Autoplay: No songs found.")
                             return await Hotty.stop_stream(chat_id)
                     else:
-                        # Normal skip if Autoplay is OFF
                         await CallbackQuery.edit_message_text(
                             f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {mention} 🥀"
                         )
