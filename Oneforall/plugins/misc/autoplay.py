@@ -116,19 +116,16 @@ async def handle_language_selection(client, CallbackQuery, _):
 
     lyrical[chat_id].pop("autoplay_mood", None)
 
-    # 1. Alert popup notification
     await CallbackQuery.answer(
         f"✅ Autoplay Enabled!\nMood: {mood.title()} | Language: {language.title()}\nQueue khatam hote hi continuous bajega!",
         show_alert=True,
     )
 
-    # 2. Panel message ko auto-delete kar do
     try:
         await CallbackQuery.message.delete()
     except Exception:
         pass
 
-    # 3. Now Playing card ko turant live '🟢 Autoplay On' me switch kar do
     try:
         await update_now_playing_markup(client, chat_id, playing=True)
     except Exception:
@@ -158,7 +155,6 @@ async def toggle_autoplay(client, CallbackQuery, _):
     autoplay_status = await is_autoplay_on(chat_id)
 
     if autoplay_status:
-        # Off kar rahe hain: Database off, alert, auto-delete panel, aur card red
         await set_autoplay(chat_id, False)
         await CallbackQuery.answer("❌ Autoplay Disabled!", show_alert=True)
         try:
@@ -171,7 +167,6 @@ async def toggle_autoplay(client, CallbackQuery, _):
             pass
         return
 
-    # Agar OFF tha aur ON karne ke liye dabaya: Direct mood config khol do
     caption = (
         "<blockquote><emoji id=5895705279416241926>🎵</emoji> <u><b>ENABLE AUTOPLAY</b></u></blockquote>\n\n"
         "<blockquote expandable>"
@@ -182,7 +177,7 @@ async def toggle_autoplay(client, CallbackQuery, _):
 
 
 async def get_autoplay_recommendation(chat_id: int):
-    """Get unique autoplay song recommendation with fallback attempts"""
+    """Get valid and playable autoplay song recommendation"""
     if chat_id not in previous_tracks:
         previous_tracks[chat_id] = []
 
@@ -194,16 +189,12 @@ async def get_autoplay_recommendation(chat_id: int):
         mood = mood_data.get("mood", "chill")
         language = mood_data.get("language", "hindi")
 
-    keywords = ["jukebox", "hits", "mashup", "latest tracks", "acoustic", "lofi", "remix", "trending"]
-    random.shuffle(keywords)
-
     search_queries = [
-        f"best {language} {mood} songs audio",
-        f"popular {language} {mood} songs",
-        f"top {language} {mood} {keywords[0]}",
-        f"{language} {mood} song {keywords[1]}",
-        f"new {language} {mood} music",
-        f"{language} hit {mood} audio tracks",
+        f"best {language} {mood} songs audio official",
+        f"popular {language} {mood} hit songs",
+        f"latest {language} {mood} tracks lyrical",
+        f"{language} {mood} acoustic audio",
+        f"top {language} {mood} melodies",
     ]
     random.shuffle(search_queries)
 
@@ -218,7 +209,15 @@ async def get_autoplay_recommendation(chat_id: int):
             if track_id in used_ids:
                 continue
 
-            if len(previous_tracks[chat_id]) >= 20:
+            # Verify availability before choosing
+            try:
+                valid = await YouTube.exists(track_id) if hasattr(YouTube, "exists") else True
+                if not valid:
+                    continue
+            except Exception:
+                pass
+
+            if len(previous_tracks[chat_id]) >= 25:
                 previous_tracks[chat_id].pop(0)
 
             previous_tracks[chat_id].append(
@@ -233,13 +232,12 @@ async def get_autoplay_recommendation(chat_id: int):
         except Exception:
             continue
 
-    # Fallback if all queries hit duplicates
+    # Final reliable fallback
     try:
-        fallback_query = f"{language} {mood} songs"
-        track_data, track_id = await YouTube.track(fallback_query)
+        track_data, track_id = await YouTube.track(f"{language} {mood} official audio")
         if track_data and track_id:
             return track_data, track_id
     except Exception as e:
-        print(f"Autoplay Final Fallback Error: {e}")
+        print(f"Autoplay Fallback Failed: {e}")
 
     return None, None
