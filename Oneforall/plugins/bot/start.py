@@ -40,12 +40,6 @@ NEXT_IMG = [
     "https://graph.org/file/35f6ffeeac9c330200742-eecc5ab1977d58e06b.jpg",
 ]
 
-STICKER = [
-    "CAACAgEAAxkBAAEEfwtqKlNmy3Re9nllA-cfjb54aBp0MQACSAYAAi4OOERdxyGw1avZfTsE",
-    "CAACAgEAAxkBAAEEfwpqKlNmi678qJqTEM4WrPq-1T270gAC1AsAAhn9UEVOjdDVW1r2EDsE",
-    "CAACAgUAAxkBAAEQEGVpSR-TuCKHP8D69SvDAAH2Gn7QjXEAAtIEAAKP9uhXzLPwoqMKxuQ2BA",
-]
-
 
 async def force_sub_private(message: Message):
     if not FORCE_CHANNEL_1 or not FORCE_CHANNEL_2:
@@ -55,7 +49,7 @@ async def force_sub_private(message: Message):
         member1 = await app.get_chat_member(f"@{FORCE_CHANNEL_1}", user_id)
         member2 = await app.get_chat_member(f"@{FORCE_CHANNEL_2}", user_id)
 
-        if member1.status in ["left", "kicked"] or member2.status in ["left", "kicked"]:
+        if member1.status in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED] or member2.status in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED]:
             buttons = InlineKeyboardMarkup(
                 [
                     [InlineKeyboardButton("📢 Join Channel 1", url=f"https://t.me/{FORCE_CHANNEL_1}")],
@@ -69,39 +63,47 @@ async def force_sub_private(message: Message):
                 reply_markup=buttons,
             )
             return True
-    except Exception as e:
-        print(f"Force Sub Error: {e}")
+    except Exception:
+        return False
     return False
 
 
 @app.on_message(filters.command(["start"]) & filters.private & ~BANNED_USERS)
 @LanguageStart
 async def start_pm(client, message: Message, _):
-    # 1. User ke message par Animated Fire Reaction 🔥
+    # 1. User Message Fire Reaction (Protected)
     try:
-        await message.react("🔥")
+        if hasattr(message, "react"):
+            await message.react("🔥")
     except Exception:
         pass
 
-    if await force_sub_private(message):
-        return
+    # 2. Force Join check
+    try:
+        if await force_sub_private(message):
+            return
+    except Exception:
+        pass
 
-    await add_served_user(message.from_user.id)
+    try:
+        await add_served_user(message.from_user.id)
+    except Exception:
+        pass
 
     # Deeplink Arguments Handling
     if len(message.text.split()) > 1:
         name = message.text.split(None, 1)[1]
-        if name[0:4] == "help":
+        if name.startswith("help"):
             keyboard = help_pannel(_)
             return await message.reply_photo(
                 random.choice(NEXT_IMG),
                 caption=_["help_1"].format(config.SUPPORT_CHAT),
                 reply_markup=keyboard,
             )
-        if name[0:3] == "sud":
+        if name.startswith("sud"):
             await sudoers_list(client=client, message=message, _=_)
             return
-        if name[0:3] == "inf":
+        if name.startswith("inf"):
             m = await message.reply_text("🔎")
             query = (str(name)).replace("info_", "", 1)
             query = f"https://www.youtube.com/watch?v={query}"
@@ -134,18 +136,11 @@ async def start_pm(client, message: Message, _):
                 reply_markup=key,
             )
 
-    # 2. Live Type / Streaming Animation Effect
-    try:
-        await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-        await asyncio.sleep(0.6)
-    except Exception:
-        pass
-
     user = message.from_user
     bot_name = app.name if hasattr(app, "name") else "𓆩ℛᴜ֟፝ʜɪ 𓆩ꨄ︎𓆪 𝐌ᴜ֟፝sɪᴄ𓆪˼"
     banner_img = random.choice(NEXT_IMG)
 
-    # 3. Clean Standard Telegram HTML (No broken raw tags)
+    # 3. Clean Standard Telegram HTML
     caption_text = (
         f"✦ <b>HEY {user.first_name.upper()}, WELCOME ABOARD!</b> <emoji id=6026256492619895014>🎵</emoji>\n\n"
         f"<blockquote><emoji id=5438224604499819092>💞</emoji> <b>I AM — <emoji id=6026236216079290036>💜</emoji> <i>{bot_name}</i> <emoji id=6026236216079290036>💜</emoji> — YOUR PERSONAL MUSIC COMPANION, LIVE 24/7. <emoji id=5436346075998864232>🥰</emoji></b></blockquote>\n\n"
@@ -164,41 +159,51 @@ async def start_pm(client, message: Message, _):
         f"🔗 <i><b>INVITE ME NOW AND ENJOY THE VIBE! 🎉</b></i>"
     )
 
-    # Inline Buttons from Oneforall/utils/inline/start.py
-    buttons = private_panel(_)
+    try:
+        buttons = private_panel(_)
+        keyboard = InlineKeyboardMarkup(buttons)
+    except Exception:
+        keyboard = None
 
-    # Send Photo with Caption & Buttons
+    # Send Photo
     sent_msg = await message.reply_photo(
         photo=banner_img,
         caption=caption_text,
         parse_mode=enums.ParseMode.HTML,
-        reply_markup=InlineKeyboardMarkup(buttons),
+        reply_markup=keyboard,
     )
 
-    # 4. Bot ke reply message par Heart Reaction ❤️
+    # 4. Bot Reply Heart Reaction (Protected)
     try:
-        await sent_msg.react("❤️")
+        if sent_msg and hasattr(sent_msg, "react"):
+            await sent_msg.react("❤️")
     except Exception:
         pass
 
-    if await is_on_off(2):
-        return await app.send_message(
-            chat_id=config.LOGGER_ID,
-            text=f"{message.from_user.mention} ᴊᴜsᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ.\n\n<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code>\n<b>ᴜsᴇʀɴᴀᴍᴇ :</b> @{message.from_user.username}",
-        )
+    try:
+        if await is_on_off(2):
+            await app.send_message(
+                chat_id=config.LOGGER_ID,
+                text=f"{message.from_user.mention} ᴊᴜsᴛ sᴛᴀʀᴛᴇᴅ ᴛʜᴇ ʙᴏᴛ.\n\n<b>ᴜsᴇʀ ɪᴅ :</b> <code>{message.from_user.id}</code>\n<b>ᴜsᴇʀɴᴀᴍᴇ :</b> @{message.from_user.username}",
+            )
+    except Exception:
+        pass
 
 
 @app.on_callback_query(filters.regex("check_sub"))
 async def check_subscription(client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
-    member1 = await app.get_chat_member(f"@{FORCE_CHANNEL_1}", user_id)
-    member2 = await app.get_chat_member(f"@{FORCE_CHANNEL_2}", user_id)
+    try:
+        member1 = await app.get_chat_member(f"@{FORCE_CHANNEL_1}", user_id)
+        member2 = await app.get_chat_member(f"@{FORCE_CHANNEL_2}", user_id)
 
-    if member1.status not in ["left", "kicked"] and member2.status not in ["left", "kicked"]:
-        await callback_query.message.delete()
-        await callback_query.message.reply_text("✅ Subscription Verified!\n\nNow send /start again.")
-    else:
-        await callback_query.answer("❌ You have not joined both channels!", show_alert=True)
+        if member1.status not in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED] and member2.status not in [enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED]:
+            await callback_query.message.delete()
+            await callback_query.message.reply_text("✅ Subscription Verified!\n\nNow send /start again.")
+        else:
+            await callback_query.answer("❌ You have not joined both channels!", show_alert=True)
+    except Exception:
+        await callback_query.answer("❌ Verification failed. Please ensure you joined.", show_alert=True)
 
 
 @app.on_message(filters.command(["start"]) & filters.group & ~BANNED_USERS)
