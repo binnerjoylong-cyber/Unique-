@@ -93,13 +93,6 @@ def _make_custom_emoji(text, eid):
             pass
         try:
             return types.RichTextCustomEmoji(
-                custom_emoji_id=emoji_str_id,
-                text=alt_text,
-            )
-        except Exception:
-            pass
-        try:
-            return types.RichTextCustomEmoji(
                 custom_emoji_id=emoji_int_id,
                 alternative_text=alt_text,
             )
@@ -108,6 +101,13 @@ def _make_custom_emoji(text, eid):
         try:
             return types.RichTextCustomEmoji(
                 document_id=emoji_int_id,
+                text=alt_text,
+            )
+        except Exception:
+            pass
+        try:
+            return types.RichTextCustomEmoji(
+                custom_emoji_id=emoji_str_id,
                 text=alt_text,
             )
         except Exception:
@@ -252,8 +252,17 @@ def html_to_rich_blocks(caption_html):
         inner_content = match.group(2).strip()
         is_expandable = "expandable" in open_tag
 
-        parsed_bq = _parse_inline(inner_content)
-        blk = _make_blockquote(parsed_bq, is_expandable=is_expandable)
+        inner_parsed = []
+        for line in inner_content.split("\n"):
+            clean_l = line.strip()
+            if clean_l:
+                inner_parsed.append(_parse_inline(clean_l))
+                inner_parsed.append(_wrap_plain("\n"))
+
+        if inner_parsed and inner_parsed[-1] == _wrap_plain("\n"):
+            inner_parsed.pop()
+
+        blk = _make_blockquote(inner_parsed, is_expandable=is_expandable)
         if blk:
             blocks.append(blk)
 
@@ -542,6 +551,7 @@ async def send_now_playing_rich(
 
 
 def build_queue_blocks(_, caption_html, chat_id, qid):
+    # Strictly text blockquotes and buttons - no photo blocks added here
     blocks = html_to_rich_blocks(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
@@ -574,8 +584,9 @@ def build_queue_blocks(_, caption_html, chat_id, qid):
 
 
 async def send_queue_rich(
-    client, chat_id, target_chat_id, caption_html, qid, replace=None
+    client, chat_id, target_chat_id, caption_html, qid, photo=None, replace=None
 ):
+    # photo keyword argument accept kar li gayi hai taaki TypeError na aaye, aur use render nahi kiya jayega
     _ = await _lang(chat_id)
     blocks = build_queue_blocks(_, caption_html, chat_id, qid)
     return await _deliver(client, target_chat_id, blocks, replace)
