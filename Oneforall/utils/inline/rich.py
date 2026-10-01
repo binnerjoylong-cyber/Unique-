@@ -11,11 +11,6 @@ from Oneforall.utils.formatters import seconds_to_min, time_to_seconds
 from strings import get_string
 
 autoplaydb = mongodb.autoplay
-
-_TAG_RE = re.compile(
-    r"<(/?)(b|u|a|code|emoji)(?:\s+(?:href|id)=([^>]+))?>",
-    re.IGNORECASE,
-)
 _consumed = set()
 _FORBIDDEN = (errors.ChatSendPhotosForbidden, errors.ChatSendMediaForbidden)
 
@@ -24,87 +19,194 @@ async def _lang(chat_id):
     return get_string(await get_lang(chat_id))
 
 
+def _clean_caption_html(caption_html: str) -> str:
+    if not caption_html:
+        return ""
+    fixed = re.sub(r"</blockquote[^>]*>", "</blockquote>", caption_html, flags=re.IGNORECASE)
+    fixed = re.sub(r"<tg-emoji\s+id=([^>]+)>", r"<emoji id=\1>", fixed, flags=re.IGNORECASE)
+    fixed = re.sub(r"</tg-emoji>", r"</emoji>", fixed, flags=re.IGNORECASE)
+    return fixed
+
+
 def _make_custom_emoji(text, eid):
-    try:
-        val = int(str(eid).strip("\"' "))
-        return types.RichTextCustomEmoji(text=text, document_id=val)
-    except Exception:
-        pass
-    try:
-        val = int(str(eid).strip("\"' "))
-        return types.RichTextCustomEmoji(text=text, custom_emoji_id=val)
-    except Exception:
-        pass
-    return text
+    digits = re.sub(r"\D", "", str(eid))
+    if not digits:
+        return text or "✨"
+    doc_id = int(digits)
+
+    # Flatten text to pure python str
+    if isinstance(text, list):
+        flat_strs = []
+        for x in text:
+            if isinstance(x, str):
+                flat_strs.append(x)
+            elif hasattr(x, "text"):
+                t = getattr(x, "text")
+                flat_strs.append(str(t) if not hasattr(t, "text") else str(getattr(t, "text", "")))
+            else:
+                flat_strs.append(str(x))
+        raw_char = "".join(flat_strs) or "✨"
+    else:
+        raw_char = str(text) if text else "✨"
+
+    raw_char = str(raw_char).strip() or "✨"
+
+    # Exact Pyrofork rich constructor binding
+    if hasattr(types, "RichTextCustomEmoji"):
+        try:
+            return types.RichTextCustomEmoji(document_id=doc_id, text=raw_char)
+        except Exception:
+            pass
+        try:
+            return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=raw_char)
+        except Exception:
+            pass
+        try:
+            return types.RichTextCustomEmoji(custom_emoji_id=str(doc_id), text=raw_char)
+        except Exception:
+            pass
+
+    return raw_char
+
+
+def _to_rich_text(items):
+    if not items:
+        return ""
+    if not isinstance(items, list):
+        return items
+
+    clean = [it for it in items if it != ""]
+    if not clean:
+        return ""
+    if len(clean) == 1:
+        return clean[0]
+
+    has_rich_obj = any(not isinstance(x, str) for x in clean)
+    if has_rich_obj and hasattr(types, "RichTextConcat"):
+        try:
+            return types.RichTextConcat(texts=clean)
+        except Exception:
+            pass
+
+    return "".join(str(x) for x in clean) if not has_rich_obj else clean
 
 
 def _parse_inline(segment):
     if not segment:
         return ""
+
+    tag_re = re.compile(
+        r"<(/?)(b|strong|i|em|u|code|emoji|tg-emoji|a)(?:\s+(?:href|id)=(['\"]?)(.*?)\3)?\s*>",
+        re.IGNORECASE,
+    )
+
     parts = []
     stack = []
     pos = 0
 
-    for m in _TAG_RE.finditer(segment):
+    for m in tag_re.finditer(segment):
         if m.start() > pos:
             parts.append(segment[pos : m.start()])
         pos = m.end()
 
         closing = m.group(1)
         tag = m.group(2).lower()
-        attr = m.group(3)
+        val = m.group(4) or ""
+
+        if tag == "strong":
+            tag = "b"
+        elif tag == "em":
+            tag = "i"
+        elif tag == "tg-emoji":
+            tag = "emoji"
 
         if not closing:
-            stack.append((tag, attr, len(parts)))
+            stack.append((tag, val, len(parts)))
         elif stack and stack[-1][0] == tag:
-            open_tag, val, start = stack.pop()
+            open_tag, attr_val, start = stack.pop()
             inner = parts[start:]
             del parts[start:]
-            inner = inner[0] if len(inner) == 1 else inner if inner else ""
 
-            if open_tag == "b":
-                parts.append(types.RichTextBold(text=inner))
-            elif open_tag == "u":
-                parts.append(types.RichTextUnderline(text=inner))
-            elif open_tag == "code":
-                parts.append(types.RichTextCode(text=inner))
-            elif open_tag == "a":
-                parts.append(types.RichTextUrl(text=inner, url=val.strip("\"' ")))
-            elif open_tag == "emoji":
-                parts.append(_make_custom_emoji(inner or "✨", val))
+            if open_tag == "emoji":
+                parts.append(_make_custom_emoji(inner, attr_val))
+            else:
+                rich_inner = _to_rich_text(inner)
+                if open_tag == "b" and hasattr(types, "RichTextBold"):
+                    parts.append(types.RichTextBold(text=rich_inner))
+                elif open_tag == "i" and hasattr(types, "RichTextItalic"):
+                    parts.append(types.RichTextItalic(text=rich_inner))
+                elif open_tag == "u" and hasattr(types, "RichTextUnderline"):
+                    parts.append(types.RichTextUnderline(text=rich_inner))
+                elif open_tag == "code" and hasattr(types, "RichTextCode"):
+                    parts.append(types.RichTextCode(text=rich_inner))
+                elif open_tag == "a" and hasattr(types, "RichTextUrl"):
+                    url = str(attr_val).strip("\"' ")
+                    parts.append(types.RichTextUrl(text=rich_inner, url=url))
+                else:
+                    parts.append(rich_inner)
 
     if pos < len(segment):
         parts.append(segment[pos:])
 
-    if not parts:
-        return ""
-    return parts[0] if len(parts) == 1 else parts
+    return _to_rich_text(parts)
+
+
+def _make_blockquote(items):
+    rich_text = _to_rich_text(items)
+    for cls_name in (
+        "InputRichBlockBlockQuotation",
+        "InputRichBlockBlockquote",
+    ):
+        cls = getattr(types, cls_name, None)
+        if cls:
+            try:
+                return cls(text=rich_text)
+            except Exception:
+                pass
+    if hasattr(types, "InputRichBlockParagraph"):
+        try:
+            return types.InputRichBlockParagraph(text=rich_text)
+        except Exception:
+            pass
+    return None
+
+
+def _make_paragraph(parsed_items):
+    rich_text = _to_rich_text(parsed_items)
+    if hasattr(types, "InputRichBlockParagraph"):
+        try:
+            return types.InputRichBlockParagraph(text=rich_text)
+        except Exception:
+            pass
+    return None
 
 
 def html_to_rich_blocks(caption_html):
+    if not caption_html:
+        return []
+
+    clean_html = _clean_caption_html(caption_html)
     blocks = []
     bq_pattern = re.compile(
-        r"<(blockquote(?:\s+[^>]*)?)>(.*?)</blockquote\s*>",
+        r"<(blockquote(?:\s+[^>]*)?)>(.*?)</blockquote[^>]*>",
         re.DOTALL | re.IGNORECASE,
     )
 
     last_idx = 0
-    for match in bq_pattern.finditer(caption_html):
+    for match in bq_pattern.finditer(clean_html):
         start, end = match.span()
         if start > last_idx:
-            pre_text = caption_html[last_idx:start].strip()
+            pre_text = clean_html[last_idx:start].strip()
             if pre_text:
                 for line in pre_text.split("\n"):
                     clean_line = line.strip()
                     if clean_line:
                         parsed = _parse_inline(clean_line)
-                        if parsed:
-                            blocks.append(types.InputRichBlockParagraph(text=parsed))
+                        blk = _make_paragraph(parsed)
+                        if blk:
+                            blocks.append(blk)
 
-        open_tag = match.group(1).lower()
         inner_content = match.group(2).strip()
-        is_expandable = "expandable" in open_tag
-
         inner_items = []
         for line in inner_content.split("\n"):
             clean_line = line.strip()
@@ -120,36 +222,31 @@ def html_to_rich_blocks(caption_html):
         if inner_items and inner_items[-1] == "\n":
             inner_items.pop()
 
-        if is_expandable and hasattr(types, "InputRichBlockExpandableBlockQuotation"):
-            try:
-                blocks.append(types.InputRichBlockExpandableBlockQuotation(text=inner_items))
-            except Exception:
-                blocks.append(types.InputRichBlockParagraph(text=inner_items))
-        elif hasattr(types, "InputRichBlockBlockQuotation"):
-            try:
-                blocks.append(types.InputRichBlockBlockQuotation(text=inner_items))
-            except Exception:
-                blocks.append(types.InputRichBlockParagraph(text=inner_items))
-        else:
-            blocks.append(types.InputRichBlockParagraph(text=inner_items))
+        blk = _make_blockquote(inner_items)
+        if blk:
+            blocks.append(blk)
 
         last_idx = end
 
-    if last_idx < len(caption_html):
-        post_text = caption_html[last_idx:].strip()
+    if last_idx < len(clean_html):
+        post_text = clean_html[last_idx:].strip()
         if post_text:
             for line in post_text.split("\n"):
                 clean_line = line.strip()
                 if clean_line:
                     parsed = _parse_inline(clean_line)
-                    if parsed:
-                        blocks.append(types.InputRichBlockParagraph(text=parsed))
+                    blk = _make_paragraph(parsed)
+                    if blk:
+                        blocks.append(blk)
 
     if not blocks:
-        for line in caption_html.split("\n"):
+        for line in clean_html.split("\n"):
             clean_line = line.strip()
             if clean_line:
-                blocks.append(types.InputRichBlockParagraph(text=_parse_inline(clean_line)))
+                parsed = _parse_inline(clean_line)
+                blk = _make_paragraph(parsed)
+                if blk:
+                    blocks.append(blk)
 
     return blocks
 
@@ -411,7 +508,8 @@ async def send_now_playing_rich(
     return msg
 
 
-def build_queue_blocks(_, caption_html, chat_id, qid):
+def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
+    # Pure clean card without photo thumbnail
     blocks = html_to_rich_blocks(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
@@ -447,7 +545,7 @@ async def send_queue_rich(
     client, chat_id, target_chat_id, caption_html, qid, photo=None, replace=None
 ):
     _ = await _lang(chat_id)
-    blocks = build_queue_blocks(_, caption_html, chat_id, qid)
+    blocks = build_queue_blocks(_, caption_html, chat_id, qid, photo=None)
     return await _deliver(client, target_chat_id, blocks, replace)
 
 
