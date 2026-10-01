@@ -60,9 +60,8 @@ def _make_custom_emoji(text, eid):
     digits = re.sub(r"\D", "", str(eid))
     if not digits:
         return _wrap_plain(text or "✨")
-    val = int(digits)
+    doc_id = int(digits)
 
-    # Flatten inner text to pure string
     if isinstance(text, list):
         flat_strs = []
         for x in text:
@@ -73,30 +72,23 @@ def _make_custom_emoji(text, eid):
                 flat_strs.append(str(inner_t) if not hasattr(inner_t, "text") else str(getattr(inner_t, "text", "")))
             else:
                 flat_strs.append(str(x))
-        raw = "".join(flat_strs) or "✨"
+        raw_char = "".join(flat_strs) or "✨"
     else:
-        raw = str(text) if text else "✨"
+        raw_char = str(text) if text else "✨"
 
-    plain_obj = _wrap_plain(raw)
+    raw_char = str(raw_char).strip() or "✨"
 
     if hasattr(types, "RichTextCustomEmoji"):
         try:
-            return types.RichTextCustomEmoji(text=plain_obj, document_id=val)
+            return types.RichTextCustomEmoji(document_id=doc_id, text=raw_char)
         except Exception:
             pass
         try:
-            return types.RichTextCustomEmoji(text=plain_obj, custom_emoji_id=val)
+            return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=raw_char)
         except Exception:
             pass
-        try:
-            return types.RichTextCustomEmoji(text=raw, document_id=val)
-        except Exception:
-            pass
-        try:
-            return types.RichTextCustomEmoji(text=raw, custom_emoji_id=val)
-        except Exception:
-            pass
-    return plain_obj
+
+    return _wrap_plain(raw_char)
 
 
 def _parse_inline(segment):
@@ -134,21 +126,22 @@ def _parse_inline(segment):
             open_tag, attr_val, start = stack.pop()
             inner = parts[start:]
             del parts[start:]
-            rich_inner = _to_rich_text(inner)
 
-            if open_tag == "b":
-                parts.append(types.RichTextBold(text=rich_inner) if hasattr(types, "RichTextBold") else rich_inner)
-            elif open_tag == "i":
-                parts.append(types.RichTextItalic(text=rich_inner) if hasattr(types, "RichTextItalic") else rich_inner)
-            elif open_tag == "u":
-                parts.append(types.RichTextUnderline(text=rich_inner) if hasattr(types, "RichTextUnderline") else rich_inner)
-            elif open_tag == "code":
-                parts.append(types.RichTextCode(text=rich_inner) if hasattr(types, "RichTextCode") else rich_inner)
-            elif open_tag == "a":
-                url = str(attr_val).strip("\"' ")
-                parts.append(types.RichTextUrl(text=rich_inner, url=url) if hasattr(types, "RichTextUrl") else rich_inner)
-            elif open_tag == "emoji":
+            if open_tag == "emoji":
                 parts.append(_make_custom_emoji(inner, attr_val))
+            else:
+                rich_inner = _to_rich_text(inner)
+                if open_tag == "b":
+                    parts.append(types.RichTextBold(text=rich_inner) if hasattr(types, "RichTextBold") else rich_inner)
+                elif open_tag == "i":
+                    parts.append(types.RichTextItalic(text=rich_inner) if hasattr(types, "RichTextItalic") else rich_inner)
+                elif open_tag == "u":
+                    parts.append(types.RichTextUnderline(text=rich_inner) if hasattr(types, "RichTextUnderline") else rich_inner)
+                elif open_tag == "code":
+                    parts.append(types.RichTextCode(text=rich_inner) if hasattr(types, "RichTextCode") else rich_inner)
+                elif open_tag == "a":
+                    url = str(attr_val).strip("\"' ")
+                    parts.append(types.RichTextUrl(text=rich_inner, url=url) if hasattr(types, "RichTextUrl") else rich_inner)
 
     if pos < len(segment):
         parts.append(segment[pos:])
