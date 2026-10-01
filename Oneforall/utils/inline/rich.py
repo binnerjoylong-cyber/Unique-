@@ -3,7 +3,7 @@ import os
 import random
 import re
 import aiohttp
-from pyrogram import enums, errors, types
+from pyrogram import enums, errors, types, raw
 from Oneforall.misc import db
 from Oneforall.core.mongo import mongodb
 from Oneforall.utils.database import get_lang
@@ -17,247 +17,6 @@ _FORBIDDEN = (errors.ChatSendPhotosForbidden, errors.ChatSendMediaForbidden)
 
 async def _lang(chat_id):
     return get_string(await get_lang(chat_id))
-
-
-def _wrap_plain(t):
-    if not t:
-        return ""
-    if hasattr(types, "RichTextPlain"):
-        try:
-            return types.RichTextPlain(text=str(t))
-        except Exception:
-            pass
-    return str(t)
-
-
-def _to_rich_text(items):
-    if not items:
-        return _wrap_plain("")
-    if not isinstance(items, list):
-        items = [items]
-
-    clean = []
-    for it in items:
-        if isinstance(it, str):
-            clean.append(_wrap_plain(it))
-        elif it is not None:
-            clean.append(it)
-
-    if not clean:
-        return _wrap_plain("")
-    if len(clean) == 1:
-        return clean[0]
-
-    if hasattr(types, "RichTextConcat"):
-        try:
-            return types.RichTextConcat(texts=clean)
-        except Exception:
-            pass
-    return clean
-
-
-def _make_custom_emoji(text, eid):
-    digits = re.sub(r"\D", "", str(eid))
-    if not digits:
-        return _wrap_plain(text or "✨")
-    doc_id = int(digits)
-
-    if isinstance(text, list):
-        flat_strs = []
-        for x in text:
-            if isinstance(x, str):
-                flat_strs.append(x)
-            elif hasattr(x, "text"):
-                inner_t = getattr(x, "text")
-                flat_strs.append(str(inner_t) if not hasattr(inner_t, "text") else str(getattr(inner_t, "text", "")))
-            else:
-                flat_strs.append(str(x))
-        raw_char = "".join(flat_strs) or "✨"
-    else:
-        raw_char = str(text) if text else "✨"
-
-    raw_char = str(raw_char).strip() or "✨"
-    plain_item = _wrap_plain(raw_char)
-
-    # Official Pyrofork Rich specification: document_id (int) + text (RichTextPlain)
-    if hasattr(types, "RichTextCustomEmoji"):
-        try:
-            return types.RichTextCustomEmoji(document_id=doc_id, text=plain_item)
-        except Exception:
-            pass
-        try:
-            return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=plain_item)
-        except Exception:
-            pass
-        try:
-            return types.RichTextCustomEmoji(document_id=doc_id, text=raw_char)
-        except Exception:
-            pass
-        try:
-            return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=raw_char)
-        except Exception:
-            pass
-
-    return plain_item
-
-
-def _parse_inline(segment):
-    if not segment:
-        return ""
-
-    tag_re = re.compile(
-        r"<(/?)(b|strong|i|em|u|code|emoji|tg-emoji|a)(?:\s+(?:href|id)=(['\"]?)(.*?)\3)?\s*>",
-        re.IGNORECASE,
-    )
-
-    parts = []
-    stack = []
-    pos = 0
-
-    for m in tag_re.finditer(segment):
-        if m.start() > pos:
-            parts.append(segment[pos : m.start()])
-        pos = m.end()
-
-        closing = m.group(1)
-        tag = m.group(2).lower()
-        val = m.group(4) or ""
-
-        if tag == "strong":
-            tag = "b"
-        elif tag == "em":
-            tag = "i"
-        elif tag == "tg-emoji":
-            tag = "emoji"
-
-        if not closing:
-            stack.append((tag, val, len(parts)))
-        elif stack and stack[-1][0] == tag:
-            open_tag, attr_val, start = stack.pop()
-            inner = parts[start:]
-            del parts[start:]
-
-            if open_tag == "emoji":
-                parts.append(_make_custom_emoji(inner, attr_val))
-            else:
-                rich_inner = _to_rich_text(inner)
-                if open_tag == "b":
-                    parts.append(types.RichTextBold(text=rich_inner) if hasattr(types, "RichTextBold") else rich_inner)
-                elif open_tag == "i":
-                    parts.append(types.RichTextItalic(text=rich_inner) if hasattr(types, "RichTextItalic") else rich_inner)
-                elif open_tag == "u":
-                    parts.append(types.RichTextUnderline(text=rich_inner) if hasattr(types, "RichTextUnderline") else rich_inner)
-                elif open_tag == "code":
-                    parts.append(types.RichTextCode(text=rich_inner) if hasattr(types, "RichTextCode") else rich_inner)
-                elif open_tag == "a":
-                    url = str(attr_val).strip("\"' ")
-                    parts.append(types.RichTextUrl(text=rich_inner, url=url) if hasattr(types, "RichTextUrl") else rich_inner)
-
-    if pos < len(segment):
-        parts.append(segment[pos:])
-
-    return _to_rich_text(parts)
-
-
-def _make_blockquote(items):
-    rich_text = _to_rich_text(items)
-    for cls_name in (
-        "InputRichBlockBlockQuotation",
-        "InputRichBlockBlockquote",
-    ):
-        cls = getattr(types, cls_name, None)
-        if cls:
-            try:
-                return cls(text=rich_text)
-            except Exception:
-                pass
-    if hasattr(types, "InputRichBlockParagraph"):
-        try:
-            return types.InputRichBlockParagraph(text=rich_text)
-        except Exception:
-            pass
-    return None
-
-
-def _make_paragraph(parsed_items):
-    rich_text = _to_rich_text(parsed_items)
-    if hasattr(types, "InputRichBlockParagraph"):
-        try:
-            return types.InputRichBlockParagraph(text=rich_text)
-        except Exception:
-            pass
-    return None
-
-
-def html_to_rich_blocks(caption_html):
-    if not caption_html:
-        return []
-
-    blocks = []
-    # Both normal blockquote and expandable blockquote matched cleanly
-    bq_pattern = re.compile(
-        r"<(blockquote(?:\s+[^>]*)?)>(.*?)</blockquote[^>]*>",
-        re.DOTALL | re.IGNORECASE,
-    )
-
-    last_idx = 0
-    for match in bq_pattern.finditer(caption_html):
-        start, end = match.span()
-        if start > last_idx:
-            pre_text = caption_html[last_idx:start].strip()
-            if pre_text:
-                for line in pre_text.split("\n"):
-                    clean_line = line.strip()
-                    if clean_line:
-                        parsed = _parse_inline(clean_line)
-                        blk = _make_paragraph(parsed)
-                        if blk:
-                            blocks.append(blk)
-
-        inner_content = match.group(2).strip()
-
-        inner_items = []
-        for line in inner_content.split("\n"):
-            clean_line = line.strip()
-            if clean_line:
-                parsed = _parse_inline(clean_line)
-                if parsed:
-                    if isinstance(parsed, list):
-                        inner_items.extend(parsed)
-                    else:
-                        inner_items.append(parsed)
-                    inner_items.append("\n")
-
-        if inner_items and inner_items[-1] == "\n":
-            inner_items.pop()
-
-        blk = _make_blockquote(inner_items)
-        if blk:
-            blocks.append(blk)
-
-        last_idx = end
-
-    if last_idx < len(caption_html):
-        post_text = caption_html[last_idx:].strip()
-        if post_text:
-            for line in post_text.split("\n"):
-                clean_line = line.strip()
-                if clean_line:
-                    parsed = _parse_inline(clean_line)
-                    blk = _make_paragraph(parsed)
-                    if blk:
-                        blocks.append(blk)
-
-    if not blocks:
-        for line in caption_html.split("\n"):
-            clean_line = line.strip()
-            if clean_line:
-                parsed = _parse_inline(clean_line)
-                blk = _make_paragraph(parsed)
-                if blk:
-                    blocks.append(blk)
-
-    return blocks
 
 
 def _progress_line(played, dur):
@@ -290,21 +49,16 @@ def _progress_line(played, dur):
     return f"{current_p}  {bar}  {current_d}"
 
 
-def _progress_row(played, dur, style=enums.ButtonStyle.DANGER):
-    return types.InputRichBlockButtons(
-        buttons=[
-            types.RichMessageButton(
-                text=_progress_line(played, dur),
-                style=style,
-                callback_data="GetTimer",
-            )
-        ]
-    )
-
-
 def _queue_len(chat_id):
     tracks = db.get(chat_id)
     return max(len(tracks) - 1, 0) if tracks else 0
+
+
+def _clean_caption_html(caption_html: str) -> str:
+    fixed = re.sub(r"</blockquote[^>]*>", "</blockquote>", caption_html, flags=re.IGNORECASE)
+    # Ensure standard tg-emoji is mapped to emoji tag
+    fixed = re.sub(r"<tg-emoji\s+id=([^>]+)>", r"<emoji id=\1>", fixed, flags=re.IGNORECASE)
+    return fixed
 
 
 async def _control_rows(chat_id, playing=True):
@@ -407,6 +161,119 @@ def _format_photo_block(photo):
             return None
 
 
+def _parse_html_to_rich(caption_html: str):
+    clean_html = _clean_caption_html(caption_html)
+    blocks = []
+    
+    # Blockquote parser
+    bq_pattern = re.compile(
+        r"<(blockquote(?:\s+[^>]*)?)>(.*?)</blockquote\s*>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    
+    tag_re = re.compile(
+        r"<(/?)(b|strong|i|em|u|code|emoji|tg-emoji|a)(?:\s+(?:href|id)=(['\"]?)(.*?)\3)?\s*>",
+        re.IGNORECASE,
+    )
+
+    def parse_inner(text):
+        if not text:
+            return types.RichTextPlain(text="")
+        parts = []
+        stack = []
+        pos = 0
+        for m in tag_re.finditer(text):
+            if m.start() > pos:
+                parts.append(types.RichTextPlain(text=text[pos:m.start()]))
+            pos = m.end()
+            closing = m.group(1)
+            tag = m.group(2).lower()
+            val = m.group(4) or ""
+            if tag == "tg-emoji":
+                tag = "emoji"
+            elif tag == "strong":
+                tag = "b"
+            elif tag == "em":
+                tag = "i"
+
+            if not closing:
+                stack.append((tag, val, len(parts)))
+            elif stack and stack[-1][0] == tag:
+                open_tag, attr_val, start = stack.pop()
+                inner = parts[start:]
+                del parts[start:]
+                if not inner:
+                    inner_txt = types.RichTextPlain(text="")
+                elif len(inner) == 1:
+                    inner_txt = inner[0]
+                else:
+                    inner_txt = types.RichTextConcat(texts=inner)
+
+                if open_tag == "b":
+                    parts.append(types.RichTextBold(text=inner_txt))
+                elif open_tag == "i":
+                    parts.append(types.RichTextItalic(text=inner_txt))
+                elif open_tag == "u":
+                    parts.append(types.RichTextUnderline(text=inner_txt))
+                elif open_tag == "code":
+                    parts.append(types.RichTextCode(text=inner_txt))
+                elif open_tag == "a":
+                    parts.append(types.RichTextUrl(text=inner_txt, url=str(attr_val).strip("\"' ")))
+                elif open_tag == "emoji":
+                    digits = re.sub(r"\D", "", str(attr_val))
+                    val_id = int(digits) if digits else 0
+                    parts.append(types.RichTextCustomEmoji(document_id=val_id, text=inner_txt))
+
+        if pos < len(text):
+            parts.append(types.RichTextPlain(text=text[pos:]))
+
+        if not parts:
+            return types.RichTextPlain(text="")
+        return parts[0] if len(parts) == 1 else types.RichTextConcat(texts=parts)
+
+    last_idx = 0
+    for match in bq_pattern.finditer(clean_html):
+        start, end = match.span()
+        if start > last_idx:
+            pre = clean_html[last_idx:start].strip()
+            if pre:
+                for line in pre.split("\n"):
+                    if line.strip():
+                        blocks.append(types.InputRichBlockParagraph(text=parse_inner(line.strip())))
+
+        open_tag = match.group(1).lower()
+        inner_content = match.group(2).strip()
+        is_expandable = "expandable" in open_tag
+        
+        # Build blockquote inner text with preserved newlines
+        quote_parts = []
+        lines = inner_content.split("\n")
+        for i, line in enumerate(lines):
+            quote_parts.append(parse_inner(line.strip()))
+            if i < len(lines) - 1:
+                quote_parts.append(types.RichTextPlain(text="\n"))
+
+        quote_rich = types.RichTextConcat(texts=quote_parts) if len(quote_parts) > 1 else quote_parts[0]
+
+        if is_expandable and hasattr(types, "InputRichBlockExpandableBlockQuotation"):
+            blocks.append(types.InputRichBlockExpandableBlockQuotation(text=quote_rich))
+        elif hasattr(types, "InputRichBlockBlockQuotation"):
+            blocks.append(types.InputRichBlockBlockQuotation(text=quote_rich))
+        else:
+            blocks.append(types.InputRichBlockParagraph(text=quote_rich))
+
+        last_idx = end
+
+    if last_idx < len(clean_html):
+        post = clean_html[last_idx:].strip()
+        if post:
+            for line in post.split("\n"):
+                if line.strip():
+                    blocks.append(types.InputRichBlockParagraph(text=parse_inner(line.strip())))
+
+    return blocks
+
+
 async def build_now_playing_blocks(
     _, photo, caption_html, chat_id, played=None, dur=None, playing=True
 ):
@@ -415,7 +282,7 @@ async def build_now_playing_blocks(
     if p_block:
         blocks.append(p_block)
 
-    blocks += html_to_rich_blocks(caption_html)
+    blocks += _parse_html_to_rich(caption_html)
 
     if not dur and db.get(chat_id):
         dur = db[chat_id][0].get("dur")
@@ -423,103 +290,24 @@ async def build_now_playing_blocks(
     cur_played = played if played else "00:00"
     cur_dur = dur if dur else "00:00"
 
-    blocks.append(_progress_row(cur_played, dur=cur_dur))
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text=_progress_line(cur_played, cur_dur),
+                    style=enums.ButtonStyle.DANGER,
+                    callback_data="GetTimer",
+                )
+            ]
+        )
+    )
     ctrls = await _control_rows(chat_id, playing)
     blocks += ctrls
     return blocks
 
 
-def _message_key(message):
-    return (message.chat.id, message.id)
-
-
-def _strip_photo(blocks):
-    return [b for b in blocks if not isinstance(b, types.InputRichBlockPhoto)]
-
-
-async def _try_deliver(client, target_chat_id, blocks, replace):
-    rich = types.InputRichMessage(blocks=blocks)
-    if replace is not None:
-        try:
-            edited = await replace.edit_text(rich_message=rich)
-        except _FORBIDDEN:
-            raise
-        except Exception:
-            try:
-                await replace.delete()
-            except Exception:
-                pass
-        else:
-            _consumed.add(_message_key(replace))
-            return edited or replace
-    return await client.send_rich_message(target_chat_id, rich_message=rich)
-
-
-async def _deliver(client, target_chat_id, blocks, replace=None):
-    try:
-        return await _try_deliver(client, target_chat_id, blocks, replace)
-    except _FORBIDDEN:
-        plain = _strip_photo(blocks)
-        if len(plain) == len(blocks):
-            raise
-        return await _try_deliver(client, target_chat_id, plain, replace)
-    except Exception:
-        plain = _strip_photo(blocks)
-        return await _try_deliver(client, target_chat_id, plain, replace)
-
-
-async def _edit_rich(message, blocks):
-    try:
-        return await message.edit_text(
-            rich_message=types.InputRichMessage(blocks=blocks)
-        )
-    except _FORBIDDEN:
-        plain = _strip_photo(blocks)
-        if len(plain) == len(blocks):
-            raise
-        return await message.edit_text(
-            rich_message=types.InputRichMessage(blocks=plain)
-        )
-    except Exception:
-        plain = _strip_photo(blocks)
-        return await message.edit_text(
-            rich_message=types.InputRichMessage(blocks=plain)
-        )
-
-
-def caption_blocks(caption_html):
-    return html_to_rich_blocks(caption_html)
-
-
-async def edit_rich(message, blocks):
-    return await _edit_rich(message, blocks)
-
-
-async def deliver_rich(client, target_chat_id, blocks, replace=None):
-    result = await _deliver(client, target_chat_id, blocks, replace)
-    if replace is not None:
-        _consumed.discard(_message_key(replace))
-    return result
-
-
-async def send_now_playing_rich(
-    client, chat_id, target_chat_id, photo, caption_html, replace=None
-):
-    _ = await _lang(chat_id)
-    local_photo = await _download_photo_if_url(photo)
-    resolved_photo = local_photo or photo
-    dur = db[chat_id][0].get("dur") if db.get(chat_id) else None
-    blocks = await build_now_playing_blocks(_, resolved_photo, caption_html, chat_id, played="00:00", dur=dur, playing=True)
-    msg = await _deliver(client, target_chat_id, blocks, replace)
-    if db.get(chat_id):
-        db[chat_id][0]["np_photo"] = resolved_photo
-        db[chat_id][0]["np_caption"] = caption_html
-    return msg
-
-
-def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
-    # Pure clean card without photo thumbnail
-    blocks = html_to_rich_blocks(caption_html)
+def build_queue_blocks(_, caption_html, chat_id, qid):
+    blocks = _parse_html_to_rich(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
             buttons=[
@@ -550,21 +338,44 @@ def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
     return blocks
 
 
+async def _deliver(client, target_chat_id, blocks, replace=None):
+    rich = types.InputRichMessage(blocks=blocks)
+    if replace is not None:
+        try:
+            return await replace.edit_text(rich_message=rich)
+        except Exception:
+            try:
+                await replace.delete()
+            except Exception:
+                pass
+    return await client.send_rich_message(target_chat_id, rich_message=rich)
+
+
+async def send_now_playing_rich(
+    client, chat_id, target_chat_id, photo, caption_html, replace=None
+):
+    _ = await _lang(chat_id)
+    local_photo = await _download_photo_if_url(photo)
+    resolved_photo = local_photo or photo
+    dur = db[chat_id][0].get("dur") if db.get(chat_id) else None
+    blocks = await build_now_playing_blocks(_, resolved_photo, caption_html, chat_id, played="00:00", dur=dur, playing=True)
+    msg = await _deliver(client, target_chat_id, blocks, replace)
+    if db.get(chat_id):
+        db[chat_id][0]["np_photo"] = resolved_photo
+        db[chat_id][0]["np_caption"] = caption_html
+    return msg
+
+
 async def send_queue_rich(
     client, chat_id, target_chat_id, caption_html, qid, photo=None, replace=None
 ):
     _ = await _lang(chat_id)
-    # Ignored photo here to keep Queue card without image
-    blocks = build_queue_blocks(_, caption_html, chat_id, qid, photo=None)
+    blocks = build_queue_blocks(_, caption_html, chat_id, qid)
     return await _deliver(client, target_chat_id, blocks, replace)
 
 
 async def release_mystic(mystic):
     if mystic is None:
-        return
-    key = _message_key(mystic)
-    if key in _consumed:
-        _consumed.discard(key)
         return
     try:
         await mystic.delete()
@@ -582,7 +393,10 @@ async def update_now_playing_progress(mystic, chat_id, played, dur, playing=True
         return None
     _ = await _lang(chat_id)
     blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
-    return await _edit_rich(mystic, blocks)
+    try:
+        return await mystic.edit_text(rich_message=types.InputRichMessage(blocks=blocks))
+    except Exception:
+        return None
 
 
 async def set_now_playing_state(chat_id, playing):
@@ -599,7 +413,7 @@ async def set_now_playing_state(chat_id, playing):
     _ = await _lang(chat_id)
     blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
     try:
-        return await _edit_rich(mystic, blocks)
+        return await mystic.edit_text(rich_message=types.InputRichMessage(blocks=blocks))
     except Exception:
         return None
 
@@ -630,22 +444,11 @@ async def update_now_playing_markup(client, chat_id: int, playing: bool = True):
                 chat_id=chat_id, message_id=msg_id, rich_message=rich
             )
     except Exception:
-        try:
-            plain = _strip_photo(blocks)
-            if isinstance(msg_id, types.Message):
-                await msg_id.edit_text(rich_message=types.InputRichMessage(blocks=plain))
-            else:
-                await client.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=msg_id,
-                    rich_message=types.InputRichMessage(blocks=plain),
-                )
-        except Exception:
-            pass
+        pass
 
 
 def rich_autoplay_mood_blocks(caption_html: str):
-    blocks = html_to_rich_blocks(caption_html)
+    blocks = _parse_html_to_rich(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
             buttons=[
@@ -693,7 +496,7 @@ def rich_autoplay_mood_blocks(caption_html: str):
 
 
 def rich_autoplay_language_blocks(caption_html: str):
-    blocks = html_to_rich_blocks(caption_html)
+    blocks = _parse_html_to_rich(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
             buttons=[
@@ -738,3 +541,16 @@ def rich_autoplay_language_blocks(caption_html: str):
         )
     )
     return blocks
+
+# Aliases
+def html_to_rich_blocks(caption_html):
+    return _parse_html_to_rich(caption_html)
+
+def caption_blocks(caption_html):
+    return _parse_html_to_rich(caption_html)
+
+async def edit_rich(message, blocks):
+    return await message.edit_text(rich_message=types.InputRichMessage(blocks=blocks))
+
+async def deliver_rich(client, target_chat_id, blocks, replace=None):
+    return await _deliver(client, target_chat_id, blocks, replace)
