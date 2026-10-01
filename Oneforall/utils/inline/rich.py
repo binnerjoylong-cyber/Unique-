@@ -60,7 +60,6 @@ def _make_custom_emoji(text, eid):
     digits = re.sub(r"\D", "", str(eid))
     if not digits:
         return _wrap_plain(text or "✨")
-    doc_id = int(digits)
 
     if isinstance(text, list):
         flat_strs = []
@@ -69,35 +68,52 @@ def _make_custom_emoji(text, eid):
                 flat_strs.append(x)
             elif hasattr(x, "text"):
                 inner_t = getattr(x, "text")
-                flat_strs.append(str(inner_t) if not hasattr(inner_t, "text") else str(getattr(inner_t, "text", "")))
+                flat_strs.append(
+                    str(inner_t)
+                    if not hasattr(inner_t, "text")
+                    else str(getattr(inner_t, "text", ""))
+                )
             else:
                 flat_strs.append(str(x))
-        raw_char = "".join(flat_strs) or "✨"
+        alt_text = "".join(flat_strs) or "✨"
     else:
-        raw_char = str(text) if text else "✨"
+        alt_text = str(text) if text else "✨"
 
-    raw_char = str(raw_char).strip() or "✨"
-    plain_item = _wrap_plain(raw_char)
+    alt_text = str(alt_text).strip() or "✨"
+    emoji_str_id = str(digits)
+    emoji_int_id = int(digits)
 
     if hasattr(types, "RichTextCustomEmoji"):
         try:
-            return types.RichTextCustomEmoji(document_id=doc_id, text=plain_item)
+            return types.RichTextCustomEmoji(
+                custom_emoji_id=emoji_str_id,
+                alternative_text=alt_text,
+            )
         except Exception:
             pass
         try:
-            return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=plain_item)
+            return types.RichTextCustomEmoji(
+                custom_emoji_id=emoji_str_id,
+                text=alt_text,
+            )
         except Exception:
             pass
         try:
-            return types.RichTextCustomEmoji(document_id=doc_id, text=raw_char)
+            return types.RichTextCustomEmoji(
+                custom_emoji_id=emoji_int_id,
+                alternative_text=alt_text,
+            )
         except Exception:
             pass
         try:
-            return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=raw_char)
+            return types.RichTextCustomEmoji(
+                document_id=emoji_int_id,
+                text=alt_text,
+            )
         except Exception:
             pass
 
-    return plain_item
+    return _wrap_plain(alt_text)
 
 
 def _parse_inline(segment):
@@ -105,7 +121,7 @@ def _parse_inline(segment):
         return ""
 
     tag_re = re.compile(
-        r"<(/?)(b|strong|i|em|u|code|emoji|tg-emoji|a)(?:\s+(?:href|id)=(['\"]?)(.*?)\3)?\s*>",
+        r"<(/?)(b|strong|i|em|u|code|emoji|tg-emoji|a)(?:\s+(?:href|id|emoji-id|document_id)=(['\"]?)(.*?)\3)?\s*>",
         re.IGNORECASE,
     )
 
@@ -141,16 +157,36 @@ def _parse_inline(segment):
             else:
                 rich_inner = _to_rich_text(inner)
                 if open_tag == "b":
-                    parts.append(types.RichTextBold(text=rich_inner) if hasattr(types, "RichTextBold") else rich_inner)
+                    parts.append(
+                        types.RichTextBold(text=rich_inner)
+                        if hasattr(types, "RichTextBold")
+                        else rich_inner
+                    )
                 elif open_tag == "i":
-                    parts.append(types.RichTextItalic(text=rich_inner) if hasattr(types, "RichTextItalic") else rich_inner)
+                    parts.append(
+                        types.RichTextItalic(text=rich_inner)
+                        if hasattr(types, "RichTextItalic")
+                        else rich_inner
+                    )
                 elif open_tag == "u":
-                    parts.append(types.RichTextUnderline(text=rich_inner) if hasattr(types, "RichTextUnderline") else rich_inner)
+                    parts.append(
+                        types.RichTextUnderline(text=rich_inner)
+                        if hasattr(types, "RichTextUnderline")
+                        else rich_inner
+                    )
                 elif open_tag == "code":
-                    parts.append(types.RichTextCode(text=rich_inner) if hasattr(types, "RichTextCode") else rich_inner)
+                    parts.append(
+                        types.RichTextCode(text=rich_inner)
+                        if hasattr(types, "RichTextCode")
+                        else rich_inner
+                    )
                 elif open_tag == "a":
                     url = str(attr_val).strip("\"' ")
-                    parts.append(types.RichTextUrl(text=rich_inner, url=url) if hasattr(types, "RichTextUrl") else rich_inner)
+                    parts.append(
+                        types.RichTextUrl(text=rich_inner, url=url)
+                        if hasattr(types, "RichTextUrl")
+                        else rich_inner
+                    )
 
     if pos < len(segment):
         parts.append(segment[pos:])
@@ -158,18 +194,18 @@ def _parse_inline(segment):
     return _to_rich_text(parts)
 
 
-def _make_blockquote(items):
+def _make_blockquote(items, is_expandable=False):
     rich_text = _to_rich_text(items)
-    for cls_name in (
-        "InputRichBlockBlockQuotation",
-        "InputRichBlockBlockquote",
-    ):
-        cls = getattr(types, cls_name, None)
-        if cls:
-            try:
-                return cls(text=rich_text)
-            except Exception:
-                pass
+    if is_expandable and hasattr(types, "InputRichBlockExpandableBlockQuotation"):
+        try:
+            return types.InputRichBlockExpandableBlockQuotation(text=rich_text)
+        except Exception:
+            pass
+    if hasattr(types, "InputRichBlockBlockQuotation"):
+        try:
+            return types.InputRichBlockBlockQuotation(text=rich_text)
+        except Exception:
+            pass
     if hasattr(types, "InputRichBlockParagraph"):
         try:
             return types.InputRichBlockParagraph(text=rich_text)
@@ -212,24 +248,12 @@ def html_to_rich_blocks(caption_html):
                         if blk:
                             blocks.append(blk)
 
+        open_tag = match.group(1).lower()
         inner_content = match.group(2).strip()
+        is_expandable = "expandable" in open_tag
 
-        inner_items = []
-        for line in inner_content.split("\n"):
-            clean_line = line.strip()
-            if clean_line:
-                parsed = _parse_inline(clean_line)
-                if parsed:
-                    if isinstance(parsed, list):
-                        inner_items.extend(parsed)
-                    else:
-                        inner_items.append(parsed)
-                    inner_items.append("\n")
-
-        if inner_items and inner_items[-1] == "\n":
-            inner_items.pop()
-
-        blk = _make_blockquote(inner_items)
+        parsed_bq = _parse_inline(inner_content)
+        blk = _make_blockquote(parsed_bq, is_expandable=is_expandable)
         if blk:
             blocks.append(blk)
 
@@ -507,7 +531,9 @@ async def send_now_playing_rich(
     local_photo = await _download_photo_if_url(photo)
     resolved_photo = local_photo or photo
     dur = db[chat_id][0].get("dur") if db.get(chat_id) else None
-    blocks = await build_now_playing_blocks(_, resolved_photo, caption_html, chat_id, played="00:00", dur=dur, playing=True)
+    blocks = await build_now_playing_blocks(
+        _, resolved_photo, caption_html, chat_id, played="00:00", dur=dur, playing=True
+    )
     msg = await _deliver(client, target_chat_id, blocks, replace)
     if db.get(chat_id):
         db[chat_id][0]["np_photo"] = resolved_photo
@@ -515,8 +541,7 @@ async def send_now_playing_rich(
     return msg
 
 
-def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
-    # Pure clean card without photo
+def build_queue_blocks(_, caption_html, chat_id, qid):
     blocks = html_to_rich_blocks(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
@@ -549,10 +574,10 @@ def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
 
 
 async def send_queue_rich(
-    client, chat_id, target_chat_id, caption_html, qid, photo=None, replace=None
+    client, chat_id, target_chat_id, caption_html, qid, replace=None
 ):
     _ = await _lang(chat_id)
-    blocks = build_queue_blocks(_, caption_html, chat_id, qid, photo=None)
+    blocks = build_queue_blocks(_, caption_html, chat_id, qid)
     return await _deliver(client, target_chat_id, blocks, replace)
 
 
@@ -578,7 +603,9 @@ async def update_now_playing_progress(mystic, chat_id, played, dur, playing=True
     if not photo or not caption_html:
         return None
     _ = await _lang(chat_id)
-    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    blocks = await build_now_playing_blocks(
+        _, photo, caption_html, chat_id, played, dur, playing
+    )
     return await _edit_rich(mystic, blocks)
 
 
@@ -594,7 +621,9 @@ async def set_now_playing_state(chat_id, playing):
     played = seconds_to_min(info[0].get("played", 0)) or "00:00"
     dur = info[0].get("dur")
     _ = await _lang(chat_id)
-    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    blocks = await build_now_playing_blocks(
+        _, photo, caption_html, chat_id, played, dur, playing
+    )
     try:
         return await _edit_rich(mystic, blocks)
     except Exception:
