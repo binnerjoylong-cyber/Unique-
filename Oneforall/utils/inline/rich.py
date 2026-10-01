@@ -4,7 +4,6 @@ import random
 import re
 import aiohttp
 from pyrogram import enums, errors, types
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from Oneforall.misc import db
 from Oneforall.core.mongo import mongodb
 from Oneforall.utils.database import get_lang
@@ -12,11 +11,256 @@ from Oneforall.utils.formatters import seconds_to_min, time_to_seconds
 from strings import get_string
 
 autoplaydb = mongodb.autoplay
+
+_TAG_RE = re.compile(
+    r"<(/?)(b|strong|i|em|u|code|emoji|tg-emoji)(?:\s+(?:href|id)=(['\"]?)(.*?)\3)?\s*>",
+    re.IGNORECASE,
+)
 _consumed = set()
+_FORBIDDEN = (errors.ChatSendPhotosForbidden, errors.ChatSendMediaForbidden)
 
 
 async def _lang(chat_id):
     return get_string(await get_lang(chat_id))
+
+
+def _wrap_plain(t):
+    if not t:
+        return None
+    if hasattr(types, "RichTextPlain"):
+        try:
+            return types.RichTextPlain(text=str(t))
+        except Exception:
+            pass
+    return str(t)
+
+
+def _to_rich_text(items):
+    if not items:
+        return _wrap_plain("")
+    if not isinstance(items, list):
+        items = [items]
+
+    clean = []
+    for it in items:
+        if isinstance(it, str):
+            p = _wrap_plain(it)
+            if p is not None:
+                clean.append(p)
+        elif it is not None:
+            clean.append(it)
+
+    if not clean:
+        return _wrap_plain("")
+    if len(clean) == 1:
+        return clean[0]
+
+    if hasattr(types, "RichTextConcat"):
+        try:
+            return types.RichTextConcat(texts=clean)
+        except Exception:
+            pass
+    return clean
+
+
+def _make_custom_emoji(text, eid):
+    digits = re.sub(r"\D", "", str(eid))
+    if not digits:
+        return text
+    val = int(digits)
+    raw_str = text if isinstance(text, str) else "✨"
+    rich_plain = _wrap_plain(raw_str)
+
+    # Pyrofork requires text to be a RichText instance (RichTextPlain)
+    if hasattr(types, "RichTextCustomEmoji"):
+        try:
+            return types.RichTextCustomEmoji(text=rich_plain, document_id=val)
+        except Exception:
+            pass
+        try:
+            return types.RichTextCustomEmoji(text=raw_str, document_id=val)
+        except Exception:
+            pass
+        try:
+            return types.RichTextCustomEmoji(text=rich_plain, custom_emoji_id=val)
+        except Exception:
+            pass
+        try:
+            return types.RichTextCustomEmoji(text=raw_str, custom_emoji_id=val)
+        except Exception:
+            pass
+    return rich_plain or raw_str
+
+
+def _parse_inline(segment):
+    if not segment:
+        return ""
+    parts = []
+    stack = []
+    pos = 0
+
+    for m in _TAG_RE.finditer(segment):
+        if m.start() > pos:
+            parts.append(segment[pos : m.start()])
+        pos = m.end()
+
+        closing = m.group(1)
+        tag = m.group(2).lower()
+        val = m.group(4) or ""
+
+        if tag == "strong":
+            tag = "b"
+        elif tag == "em":
+            tag = "i"
+        elif tag == "tg-emoji":
+            tag = "emoji"
+
+        if not closing:
+            stack.append((tag, val, len(parts)))
+        elif stack and stack[-1][0] == tag:
+            open_tag, attr_val, start = stack.pop()
+            inner = parts[start:]
+            del parts[start:]
+            inner = inner[0] if len(inner) == 1 else inner if inner else ""
+
+            rich_inner = _to_rich_text(inner)
+
+            if open_tag == "b":
+                if hasattr(types, "RichTextBold"):
+                    parts.append(types.RichTextBold(text=rich_inner))
+                else:
+                    parts.append(inner)
+            elif open_tag == "i":
+                if hasattr(types, "RichTextItalic"):
+                    parts.append(types.RichTextItalic(text=rich_inner))
+                else:
+                    parts.append(inner)
+            elif open_tag == "u":
+                if hasattr(types, "RichTextUnderline"):
+                    parts.append(types.RichTextUnderline(text=rich_inner))
+                else:
+                    parts.append(inner)
+            elif open_tag == "code":
+                if hasattr(types, "RichTextCode"):
+                    parts.append(types.RichTextCode(text=rich_inner))
+                else:
+                    parts.append(inner)
+            elif open_tag == "a":
+                if hasattr(types, "RichTextUrl"):
+                    parts.append(types.RichTextUrl(text=rich_inner, url=str(attr_val).strip("\"' ")))
+                else:
+                    parts.append(inner)
+            elif open_tag == "emoji":
+                parts.append(_make_custom_emoji(inner or "✨", attr_val))
+
+    if pos < len(segment):
+        parts.append(segment[pos:])
+
+    if not parts:
+        return ""
+    return parts[0] if len(parts) == 1 else parts
+
+
+def _make_blockquote(items, is_expandable=False):
+    rich_text = _to_rich_text(items)
+    if is_expandable and hasattr(types, "InputRichBlockExpandableBlockQuotation"):
+        try:
+            return types.InputRichBlockExpandableBlockQuotation(text=rich_text)
+        except Exception:
+            pass
+    if hasattr(types, "InputRichBlockBlockQuotation"):
+        try:
+            return types.InputRichBlockBlockQuotation(text=rich_text)
+        except Exception:
+            pass
+    if hasattr(types, "InputRichBlockParagraph"):
+        try:
+            return types.InputRichBlockParagraph(text=rich_text)
+        except Exception:
+            pass
+    return None
+
+
+def _make_paragraph(parsed_items):
+    rich_text = _to_rich_text(parsed_items)
+    if hasattr(types, "InputRichBlockParagraph"):
+        try:
+            return types.InputRichBlockParagraph(text=rich_text)
+        except Exception:
+            pass
+    return None
+
+
+def html_to_rich_blocks(caption_html):
+    if not caption_html:
+        return []
+
+    blocks = []
+    bq_pattern = re.compile(
+        r"<(blockquote(?:\s+[^>]*)?)>(.*?)</blockquote[^>]*>",
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    last_idx = 0
+    for match in bq_pattern.finditer(caption_html):
+        start, end = match.span()
+        if start > last_idx:
+            pre_text = caption_html[last_idx:start].strip()
+            if pre_text:
+                for line in pre_text.split("\n"):
+                    clean_line = line.strip()
+                    if clean_line:
+                        parsed = _parse_inline(clean_line)
+                        blk = _make_paragraph(parsed)
+                        if blk:
+                            blocks.append(blk)
+
+        open_tag = match.group(1).lower()
+        inner_content = match.group(2).strip()
+        is_expandable = "expandable" in open_tag
+
+        inner_items = []
+        for line in inner_content.split("\n"):
+            clean_line = line.strip()
+            if clean_line:
+                parsed = _parse_inline(clean_line)
+                if parsed:
+                    if isinstance(parsed, list):
+                        inner_items.extend(parsed)
+                    else:
+                        inner_items.append(parsed)
+                    inner_items.append("\n")
+
+        if inner_items and inner_items[-1] == "\n":
+            inner_items.pop()
+
+        blk = _make_blockquote(inner_items, is_expandable=is_expandable)
+        if blk:
+            blocks.append(blk)
+
+        last_idx = end
+
+    if last_idx < len(caption_html):
+        post_text = caption_html[last_idx:].strip()
+        if post_text:
+            for line in post_text.split("\n"):
+                clean_line = line.strip()
+                if clean_line:
+                    parsed = _parse_inline(clean_line)
+                    blk = _make_paragraph(parsed)
+                    if blk:
+                        blocks.append(blk)
+
+    if not blocks:
+        for line in caption_html.split("\n"):
+            clean_line = line.strip()
+            if clean_line:
+                parsed = _parse_inline(clean_line)
+                blk = _make_paragraph(parsed)
+                if blk:
+                    blocks.append(blk)
+
+    return blocks
 
 
 def _progress_line(played, dur):
@@ -49,71 +293,87 @@ def _progress_line(played, dur):
     return f"{current_p}  {bar}  {current_d}"
 
 
+def _progress_row(played, dur, style=enums.ButtonStyle.DANGER):
+    return types.InputRichBlockButtons(
+        buttons=[
+            types.RichMessageButton(
+                text=_progress_line(played, dur),
+                style=style,
+                callback_data="GetTimer",
+            )
+        ]
+    )
+
+
 def _queue_len(chat_id):
     tracks = db.get(chat_id)
     return max(len(tracks) - 1, 0) if tracks else 0
 
 
-def _btn(text, emoji_id=None, style=enums.ButtonStyle.DEFAULT, **kwargs):
-    try:
-        if emoji_id:
-            return InlineKeyboardButton(
-                text=text,
-                icon_custom_emoji_id=int(emoji_id),
-                style=style,
-                **kwargs,
-            )
-        return InlineKeyboardButton(text=text, style=style, **kwargs)
-    except TypeError:
-        return InlineKeyboardButton(text=text, **kwargs)
-
-
-async def _get_control_keyboard(chat_id, played=None, dur=None, playing=True):
-    cur_played = played if played else "00:00"
-    cur_dur = dur if dur else "00:00"
+async def _control_rows(chat_id, playing=True):
     q_len = _queue_len(chat_id)
+    toggle = (
+        types.RichMessageButton(
+            text="II Pause",
+            style=enums.ButtonStyle.SUCCESS,
+            callback_data=f"ADMIN Pause|{chat_id}",
+        )
+        if playing
+        else types.RichMessageButton(
+            text="▷ Resume",
+            style=enums.ButtonStyle.SUCCESS,
+            callback_data=f"ADMIN Resume|{chat_id}",
+        )
+    )
 
     doc = await autoplaydb.find_one({"chat_id": chat_id})
     is_auto = doc.get("autoplay", False) if doc else False
 
-    auto_text = "🟢 Autoplay On" if is_auto else "🔴 Autoplay Off"
-    auto_style = enums.ButtonStyle.SUCCESS if is_auto else enums.ButtonStyle.DANGER
+    if is_auto:
+        auto_btn = types.RichMessageButton(
+            text="🟢 Autoplay On",
+            style=enums.ButtonStyle.SUCCESS,
+            callback_data=f"open_autoplay_card|{chat_id}",
+        )
+    else:
+        auto_btn = types.RichMessageButton(
+            text="🔴 Autoplay Off",
+            style=enums.ButtonStyle.DANGER,
+            callback_data=f"open_autoplay_card|{chat_id}",
+        )
 
-    toggle_btn = (
-        _btn("II Pause", style=enums.ButtonStyle.SUCCESS, callback_data=f"ADMIN Pause|{chat_id}")
-        if playing
-        else _btn("▷ Resume", style=enums.ButtonStyle.SUCCESS, callback_data=f"ADMIN Resume|{chat_id}")
-    )
-
-    keyboard = [
-        [
-            _btn(_progress_line(cur_played, cur_dur), style=enums.ButtonStyle.DANGER, callback_data="GetTimer")
-        ],
-        [
-            _btn("↺ Replay", style=enums.ButtonStyle.DEFAULT, callback_data=f"ADMIN Replay|{chat_id}"),
-            toggle_btn,
-            _btn("» Skip", style=enums.ButtonStyle.PRIMARY, callback_data=f"ADMIN Skip|{chat_id}"),
-        ],
-        [
-            _btn("+ Playlist", style=enums.ButtonStyle.SUCCESS, callback_data=f"add_playlist|{chat_id}"),
-            _btn(auto_text, style=auto_style, callback_data=f"open_autoplay_card|{chat_id}"),
-            _btn(f"≡ Queue · {q_len}", style=enums.ButtonStyle.DEFAULT, callback_data=f"nowplaying_queue {chat_id}"),
-        ],
+    return [
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="↺ Replay",
+                    style=enums.ButtonStyle.DEFAULT,
+                    callback_data=f"ADMIN Replay|{chat_id}",
+                ),
+                toggle,
+                types.RichMessageButton(
+                    text="» Skip",
+                    style=enums.ButtonStyle.PRIMARY,
+                    callback_data=f"ADMIN Skip|{chat_id}",
+                ),
+            ]
+        ),
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="➕ Playlist",
+                    style=enums.ButtonStyle.SUCCESS,
+                    callback_data=f"add_playlist|{chat_id}",
+                ),
+                auto_btn,
+                types.RichMessageButton(
+                    text=f"≡ Queue · {q_len}",
+                    style=enums.ButtonStyle.DEFAULT,
+                    callback_data=f"nowplaying_queue {chat_id}",
+                ),
+            ]
+        ),
     ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def _get_queue_keyboard(chat_id, qid):
-    keyboard = [
-        [
-            _btn("▷ Play Now", style=enums.ButtonStyle.SUCCESS, callback_data=f"ADMIN PlayNow|{chat_id}_{qid}")
-        ],
-        [
-            _btn("» Skip", style=enums.ButtonStyle.PRIMARY, callback_data=f"ADMIN Skip|{chat_id}"),
-            _btn("⟲ End", style=enums.ButtonStyle.DANGER, callback_data=f"ADMIN Stop|{chat_id}"),
-        ],
-    ]
-    return InlineKeyboardMarkup(keyboard)
 
 
 async def _download_photo_if_url(photo):
@@ -138,87 +398,174 @@ async def _download_photo_if_url(photo):
     return None
 
 
-def _clean_caption_html(caption_html: str) -> str:
-    # Ensure closing tags are strictly valid Telegram HTML
-    fixed = re.sub(r"</blockquote[^>]*>", "</blockquote>", caption_html, flags=re.IGNORECASE)
-    # Ensure custom emoji tags are supported across forks
-    fixed = re.sub(r"<tg-emoji\s+id=([^>]+)>", r"<emoji id=\1>", fixed, flags=re.IGNORECASE)
-    fixed = re.sub(r"</tg-emoji>", r"</emoji>", fixed, flags=re.IGNORECASE)
-    return fixed
+def _format_photo_block(photo):
+    if not photo:
+        return None
+    try:
+        return types.InputRichBlockPhoto(photo=types.InputMediaPhoto(str(photo)))
+    except Exception:
+        try:
+            return types.InputRichBlockPhoto(photo=types.InputMediaPhoto(media=str(photo)))
+        except Exception:
+            return None
 
 
-async def send_now_playing_rich(client, chat_id, target_chat_id, photo, caption_html, replace=None):
+async def build_now_playing_blocks(
+    _, photo, caption_html, chat_id, played=None, dur=None, playing=True
+):
+    blocks = []
+    p_block = _format_photo_block(photo)
+    if p_block:
+        blocks.append(p_block)
+
+    blocks += html_to_rich_blocks(caption_html)
+
+    if not dur and db.get(chat_id):
+        dur = db[chat_id][0].get("dur")
+
+    cur_played = played if played else "00:00"
+    cur_dur = dur if dur else "00:00"
+
+    blocks.append(_progress_row(cur_played, cur_dur))
+    ctrls = await _control_rows(chat_id, playing)
+    blocks += ctrls
+    return blocks
+
+
+def _message_key(message):
+    return (message.chat.id, message.id)
+
+
+def _strip_photo(blocks):
+    return [b for b in blocks if not isinstance(b, types.InputRichBlockPhoto)]
+
+
+async def _try_deliver(client, target_chat_id, blocks, replace):
+    rich = types.InputRichMessage(blocks=blocks)
+    if replace is not None:
+        try:
+            edited = await replace.edit_text(rich_message=rich)
+        except _FORBIDDEN:
+            raise
+        except Exception:
+            try:
+                await replace.delete()
+            except Exception:
+                pass
+        else:
+            _consumed.add(_message_key(replace))
+            return edited or replace
+    return await client.send_rich_message(target_chat_id, rich_message=rich)
+
+
+async def _deliver(client, target_chat_id, blocks, replace=None):
+    try:
+        return await _try_deliver(client, target_chat_id, blocks, replace)
+    except _FORBIDDEN:
+        plain = _strip_photo(blocks)
+        if len(plain) == len(blocks):
+            raise
+        return await _try_deliver(client, target_chat_id, plain, replace)
+    except Exception:
+        plain = _strip_photo(blocks)
+        return await _try_deliver(client, target_chat_id, plain, replace)
+
+
+async def _edit_rich(message, blocks):
+    try:
+        return await message.edit_text(
+            rich_message=types.InputRichMessage(blocks=blocks)
+        )
+    except _FORBIDDEN:
+        plain = _strip_photo(blocks)
+        if len(plain) == len(blocks):
+            raise
+        return await message.edit_text(
+            rich_message=types.InputRichMessage(blocks=plain)
+        )
+    except Exception:
+        plain = _strip_photo(blocks)
+        return await message.edit_text(
+            rich_message=types.InputRichMessage(blocks=plain)
+        )
+
+
+def caption_blocks(caption_html):
+    return html_to_rich_blocks(caption_html)
+
+
+async def edit_rich(message, blocks):
+    return await _edit_rich(message, blocks)
+
+
+async def deliver_rich(client, target_chat_id, blocks, replace=None):
+    result = await _deliver(client, target_chat_id, blocks, replace)
+    if replace is not None:
+        _consumed.discard(_message_key(replace))
+    return result
+
+
+async def send_now_playing_rich(
+    client, chat_id, target_chat_id, photo, caption_html, replace=None
+):
     _ = await _lang(chat_id)
     local_photo = await _download_photo_if_url(photo)
     resolved_photo = local_photo or photo
     dur = db[chat_id][0].get("dur") if db.get(chat_id) else None
-
-    clean_caption = _clean_caption_html(caption_html)
-    reply_markup = await _get_control_keyboard(chat_id, played="00:00", dur=dur, playing=True)
-
-    if replace:
-        try:
-            await replace.delete()
-        except Exception:
-            pass
-
-    msg = None
-    try:
-        if resolved_photo:
-            msg = await client.send_photo(
-                chat_id=target_chat_id,
-                photo=resolved_photo,
-                caption=clean_caption,
-                parse_mode=enums.ParseMode.HTML,
-                reply_markup=reply_markup,
-            )
-        else:
-            msg = await client.send_message(
-                chat_id=target_chat_id,
-                text=clean_caption,
-                parse_mode=enums.ParseMode.HTML,
-                reply_markup=reply_markup,
-                disable_web_page_preview=True,
-            )
-    except Exception:
-        msg = await client.send_message(
-            chat_id=target_chat_id,
-            text=clean_caption,
-            parse_mode=enums.ParseMode.HTML,
-            reply_markup=reply_markup,
-            disable_web_page_preview=True,
-        )
-
+    blocks = await build_now_playing_blocks(_, resolved_photo, caption_html, chat_id, played="00:00", dur=dur, playing=True)
+    msg = await _deliver(client, target_chat_id, blocks, replace)
     if db.get(chat_id):
         db[chat_id][0]["np_photo"] = resolved_photo
-        db[chat_id][0]["np_caption"] = clean_caption
-        db[chat_id][0]["mystic"] = msg
-
+        db[chat_id][0]["np_caption"] = caption_html
     return msg
 
 
-async def send_queue_rich(client, chat_id, target_chat_id, caption_html, qid, replace=None):
-    _ = await _lang(chat_id)
-    clean_caption = _clean_caption_html(caption_html)
-    reply_markup = _get_queue_keyboard(chat_id, qid)
-
-    if replace:
-        try:
-            await replace.delete()
-        except Exception:
-            pass
-
-    return await client.send_message(
-        chat_id=target_chat_id,
-        text=clean_caption,
-        parse_mode=enums.ParseMode.HTML,
-        reply_markup=reply_markup,
-        disable_web_page_preview=True,
+def build_queue_blocks(_, caption_html, chat_id, qid):
+    blocks = html_to_rich_blocks(caption_html)
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="▷ Play Now",
+                    style=enums.ButtonStyle.SUCCESS,
+                    callback_data=f"ADMIN PlayNow|{chat_id}_{qid}",
+                ),
+            ]
+        )
     )
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="» Skip",
+                    style=enums.ButtonStyle.PRIMARY,
+                    callback_data=f"ADMIN Skip|{chat_id}",
+                ),
+                types.RichMessageButton(
+                    text="⟲ End",
+                    style=enums.ButtonStyle.DANGER,
+                    callback_data=f"ADMIN Stop|{chat_id}",
+                ),
+            ]
+        )
+    )
+    return blocks
+
+
+async def send_queue_rich(
+    client, chat_id, target_chat_id, caption_html, qid, replace=None
+):
+    _ = await _lang(chat_id)
+    blocks = build_queue_blocks(_, caption_html, chat_id, qid)
+    return await _deliver(client, target_chat_id, blocks, replace)
 
 
 async def release_mystic(mystic):
     if mystic is None:
+        return
+    key = _message_key(mystic)
+    if key in _consumed:
+        _consumed.discard(key)
         return
     try:
         await mystic.delete()
@@ -230,15 +577,13 @@ async def update_now_playing_progress(mystic, chat_id, played, dur, playing=True
     info = db.get(chat_id)
     if not info:
         return None
+    photo = info[0].get("np_photo")
     caption_html = info[0].get("np_caption")
-    if not caption_html or not mystic:
+    if not photo or not caption_html:
         return None
-
-    reply_markup = await _get_control_keyboard(chat_id, played=played, dur=dur, playing=playing)
-    try:
-        return await mystic.edit_reply_markup(reply_markup=reply_markup)
-    except Exception:
-        return None
+    _ = await _lang(chat_id)
+    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
+    return await _edit_rich(mystic, blocks)
 
 
 async def set_now_playing_state(chat_id, playing):
@@ -246,14 +591,16 @@ async def set_now_playing_state(chat_id, playing):
     if not info:
         return None
     mystic = info[0].get("mystic")
-    if not mystic:
+    photo = info[0].get("np_photo")
+    caption_html = info[0].get("np_caption")
+    if not mystic or not photo or not caption_html:
         return None
-
     played = seconds_to_min(info[0].get("played", 0)) or "00:00"
     dur = info[0].get("dur")
-    reply_markup = await _get_control_keyboard(chat_id, played=played, dur=dur, playing=playing)
+    _ = await _lang(chat_id)
+    blocks = await build_now_playing_blocks(_, photo, caption_html, chat_id, played, dur, playing)
     try:
-        return await mystic.edit_reply_markup(reply_markup=reply_markup)
+        return await _edit_rich(mystic, blocks)
     except Exception:
         return None
 
@@ -263,82 +610,132 @@ async def update_now_playing_markup(client, chat_id: int, playing: bool = True):
     if not tracks:
         return
     cur = tracks[0]
-    msg = cur.get("mystic")
+    photo = cur.get("np_photo")
+    caption = cur.get("np_caption")
     dur = cur.get("dur")
-    if not msg:
+    msg_id = cur.get("mystic")
+
+    if not msg_id or not caption:
         return
 
-    reply_markup = await _get_control_keyboard(chat_id, played="00:00", dur=dur, playing=playing)
+    _ = await _lang(chat_id)
+    blocks = await build_now_playing_blocks(
+        _, photo, caption, chat_id, played="00:00", dur=dur, playing=playing
+    )
+    rich = types.InputRichMessage(blocks=blocks)
     try:
-        if isinstance(msg, types.Message):
-            await msg.edit_reply_markup(reply_markup=reply_markup)
+        if isinstance(msg_id, types.Message):
+            await msg_id.edit_text(rich_message=rich)
         else:
-            await client.edit_message_reply_markup(chat_id=chat_id, message_id=msg, reply_markup=reply_markup)
+            await client.edit_message_text(
+                chat_id=chat_id, message_id=msg_id, rich_message=rich
+            )
     except Exception:
-        pass
+        try:
+            plain = _strip_photo(blocks)
+            if isinstance(msg_id, types.Message):
+                await msg_id.edit_text(rich_message=types.InputRichMessage(blocks=plain))
+            else:
+                await client.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    rich_message=types.InputRichMessage(blocks=plain),
+                )
+        except Exception:
+            pass
 
 
 def rich_autoplay_mood_blocks(caption_html: str):
-    caption = _clean_caption_html(caption_html)
-    keyboard = [
-        [
-            InlineKeyboardButton("✨ Chill", callback_data="songconfig_mood:chill"),
-            InlineKeyboardButton("⚡ Party", callback_data="songconfig_mood:party"),
-        ],
-        [
-            InlineKeyboardButton("💔 Sad", callback_data="songconfig_mood:sad"),
-            InlineKeyboardButton("💖 Romantic", callback_data="songconfig_mood:romantic"),
-        ],
-        [
-            InlineKeyboardButton("✖ Close", callback_data="close_panel")
-        ],
-    ]
-    return {"text": caption, "reply_markup": InlineKeyboardMarkup(keyboard)}
+    blocks = html_to_rich_blocks(caption_html)
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="✨ Chill",
+                    style=enums.ButtonStyle.SUCCESS,
+                    callback_data="songconfig_mood:chill",
+                ),
+                types.RichMessageButton(
+                    text="⚡ Party",
+                    style=enums.ButtonStyle.PRIMARY,
+                    callback_data="songconfig_mood:party",
+                ),
+            ]
+        )
+    )
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="💔 Sad",
+                    style=enums.ButtonStyle.DANGER,
+                    callback_data="songconfig_mood:sad",
+                ),
+                types.RichMessageButton(
+                    text="💖 Romantic",
+                    style=enums.ButtonStyle.SUCCESS,
+                    callback_data="songconfig_mood:romantic",
+                ),
+            ]
+        )
+    )
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="✖ Close",
+                    style=enums.ButtonStyle.DANGER,
+                    callback_data="close_panel",
+                )
+            ]
+        )
+    )
+    return blocks
 
 
 def rich_autoplay_language_blocks(caption_html: str):
-    caption = _clean_caption_html(caption_html)
-    keyboard = [
-        [
-            InlineKeyboardButton("🇮🇳 Hindi", callback_data="songconfig_language:hindi"),
-            InlineKeyboardButton("🌐 English", callback_data="songconfig_language:english"),
-        ],
-        [
-            InlineKeyboardButton("🎸 Punjabi", callback_data="songconfig_language:punjabi"),
-            InlineKeyboardButton("💫 Haryanvi", callback_data="songconfig_language:haryanvi"),
-        ],
-        [
-            InlineKeyboardButton("✖ Close", callback_data="close_panel")
-        ],
-    ]
-    return {"text": caption, "reply_markup": InlineKeyboardMarkup(keyboard)}
-
-
-# Compatibility wrappers
-def caption_blocks(caption_html):
-    return caption_html
-
-
-def html_to_rich_blocks(caption_html):
-    return []
-
-
-async def edit_rich(message, blocks):
-    if isinstance(blocks, dict):
-        return await message.edit_text(
-            text=blocks.get("text", ""),
-            reply_markup=blocks.get("reply_markup"),
-            parse_mode=enums.ParseMode.HTML,
+    blocks = html_to_rich_blocks(caption_html)
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="🇮🇳 Hindi",
+                    style=enums.ButtonStyle.PRIMARY,
+                    callback_data="songconfig_language:hindi",
+                ),
+                types.RichMessageButton(
+                    text="🌐 English",
+                    style=enums.ButtonStyle.SUCCESS,
+                    callback_data="songconfig_language:english",
+                ),
+            ]
         )
-    return message
-
-
-async def deliver_rich(client, target_chat_id, blocks, replace=None):
-    if isinstance(blocks, dict):
-        return await client.send_message(
-            chat_id=target_chat_id,
-            text=blocks.get("text", ""),
-            reply_markup=blocks.get("reply_markup"),
-            parse_mode=enums.ParseMode.HTML,
+    )
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="🎸 Punjabi",
+                    style=enums.ButtonStyle.DANGER,
+                    callback_data="songconfig_language:punjabi",
+                ),
+                types.RichMessageButton(
+                    text="💫 Haryanvi",
+                    style=enums.ButtonStyle.PRIMARY,
+                    callback_data="songconfig_language:haryanvi",
+                ),
+            ]
         )
-    return None
+    )
+    blocks.append(
+        types.InputRichBlockButtons(
+            buttons=[
+                types.RichMessageButton(
+                    text="✖ Close",
+                    style=enums.ButtonStyle.DANGER,
+                    callback_data="close_panel",
+                )
+            ]
+        )
+    )
+    return blocks
