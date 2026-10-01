@@ -62,32 +62,47 @@ def _make_custom_emoji(text, eid):
         return _wrap_plain(text or "✨")
     val = int(digits)
 
-    # Flatten text if list
+    # Flatten inner text to pure string
     if isinstance(text, list):
-        raw = "".join([str(x) if isinstance(x, str) else getattr(x, "text", "") for x in text]) or "✨"
+        flat_strs = []
+        for x in text:
+            if isinstance(x, str):
+                flat_strs.append(x)
+            elif hasattr(x, "text"):
+                inner_t = getattr(x, "text")
+                flat_strs.append(str(inner_t) if not hasattr(inner_t, "text") else str(getattr(inner_t, "text", "")))
+            else:
+                flat_strs.append(str(x))
+        raw = "".join(flat_strs) or "✨"
     else:
         raw = str(text) if text else "✨"
 
-    inner = _wrap_plain(raw)
+    plain_obj = _wrap_plain(raw)
 
     if hasattr(types, "RichTextCustomEmoji"):
-        for param in ("document_id", "custom_emoji_id"):
-            try:
-                return types.RichTextCustomEmoji(**{"text": inner, param: val})
-            except Exception:
-                pass
-            try:
-                return types.RichTextCustomEmoji(**{"text": raw, param: val})
-            except Exception:
-                pass
-    return inner
+        try:
+            return types.RichTextCustomEmoji(text=plain_obj, document_id=val)
+        except Exception:
+            pass
+        try:
+            return types.RichTextCustomEmoji(text=plain_obj, custom_emoji_id=val)
+        except Exception:
+            pass
+        try:
+            return types.RichTextCustomEmoji(text=raw, document_id=val)
+        except Exception:
+            pass
+        try:
+            return types.RichTextCustomEmoji(text=raw, custom_emoji_id=val)
+        except Exception:
+            pass
+    return plain_obj
 
 
 def _parse_inline(segment):
     if not segment:
         return ""
 
-    # Universal tag regex matching a href, emoji id, b, u, i, code
     tag_re = re.compile(
         r"<(/?)(b|strong|i|em|u|code|emoji|tg-emoji|a)(?:\s+(?:href|id)=(['\"]?)(.*?)\3)?\s*>",
         re.IGNORECASE,
@@ -130,12 +145,8 @@ def _parse_inline(segment):
             elif open_tag == "code":
                 parts.append(types.RichTextCode(text=rich_inner) if hasattr(types, "RichTextCode") else rich_inner)
             elif open_tag == "a":
-                # URL parsing fix
                 url = str(attr_val).strip("\"' ")
-                if hasattr(types, "RichTextUrl"):
-                    parts.append(types.RichTextUrl(text=rich_inner, url=url))
-                else:
-                    parts.append(rich_inner)
+                parts.append(types.RichTextUrl(text=rich_inner, url=url) if hasattr(types, "RichTextUrl") else rich_inner)
             elif open_tag == "emoji":
                 parts.append(_make_custom_emoji(inner, attr_val))
 
