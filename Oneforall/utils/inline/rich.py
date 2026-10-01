@@ -34,7 +34,6 @@ def _make_custom_emoji(text, eid):
         return text or "✨"
     doc_id = int(digits)
 
-    # Flatten text to pure python str
     if isinstance(text, list):
         flat_strs = []
         for x in text:
@@ -51,7 +50,6 @@ def _make_custom_emoji(text, eid):
 
     raw_char = str(raw_char).strip() or "✨"
 
-    # Exact Pyrofork rich constructor binding
     if hasattr(types, "RichTextCustomEmoji"):
         try:
             return types.RichTextCustomEmoji(document_id=doc_id, text=raw_char)
@@ -75,20 +73,19 @@ def _to_rich_text(items):
     if not isinstance(items, list):
         return items
 
-    clean = [it for it in items if it != ""]
+    clean = []
+    for it in items:
+        if isinstance(it, list):
+            clean.extend(it)
+        elif it != "":
+            clean.append(it)
+
     if not clean:
         return ""
     if len(clean) == 1:
         return clean[0]
 
-    has_rich_obj = any(not isinstance(x, str) for x in clean)
-    if has_rich_obj and hasattr(types, "RichTextConcat"):
-        try:
-            return types.RichTextConcat(texts=clean)
-        except Exception:
-            pass
-
-    return "".join(str(x) for x in clean) if not has_rich_obj else clean
+    return clean
 
 
 def _parse_inline(segment):
@@ -208,7 +205,8 @@ def html_to_rich_blocks(caption_html):
 
         inner_content = match.group(2).strip()
         inner_items = []
-        for line in inner_content.split("\n"):
+        lines = inner_content.split("\n")
+        for i, line in enumerate(lines):
             clean_line = line.strip()
             if clean_line:
                 parsed = _parse_inline(clean_line)
@@ -217,10 +215,8 @@ def html_to_rich_blocks(caption_html):
                         inner_items.extend(parsed)
                     else:
                         inner_items.append(parsed)
-                    inner_items.append("\n")
-
-        if inner_items and inner_items[-1] == "\n":
-            inner_items.pop()
+                    if i < len(lines) - 1:
+                        inner_items.append("\n")
 
         blk = _make_blockquote(inner_items)
         if blk:
@@ -509,7 +505,6 @@ async def send_now_playing_rich(
 
 
 def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
-    # Pure clean card without photo thumbnail
     blocks = html_to_rich_blocks(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
