@@ -60,6 +60,7 @@ def _make_custom_emoji(text, eid):
     digits = re.sub(r"\D", "", str(eid))
     if not digits:
         return _wrap_plain(text or "✨")
+    doc_id = int(digits)
 
     if isinstance(text, list):
         flat_strs = []
@@ -76,26 +77,21 @@ def _make_custom_emoji(text, eid):
         raw_char = str(text) if text else "✨"
 
     raw_char = str(raw_char).strip() or "✨"
-    doc_id = int(digits)
     plain_item = _wrap_plain(raw_char)
 
     if hasattr(types, "RichTextCustomEmoji"):
-        # Pyrofork variant 1: document_id (int) + text (RichText)
         try:
             return types.RichTextCustomEmoji(document_id=doc_id, text=plain_item)
         except Exception:
             pass
-        # Pyrofork variant 2: custom_emoji_id (int) + text (RichText)
         try:
             return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=plain_item)
         except Exception:
             pass
-        # Pyrofork variant 3: document_id (int) + text (str)
         try:
             return types.RichTextCustomEmoji(document_id=doc_id, text=raw_char)
         except Exception:
             pass
-        # Pyrofork variant 4: custom_emoji_id (int) + text (str)
         try:
             return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=raw_char)
         except Exception:
@@ -164,22 +160,19 @@ def _parse_inline(segment):
 
 def _make_blockquote(items, is_expandable=False):
     rich_text = _to_rich_text(items)
+
+    classes_to_try = []
     if is_expandable:
-        for cls_name in (
+        classes_to_try.extend([
             "InputRichBlockExpandableBlockQuotation",
             "InputRichBlockExpandableBlockquote",
-        ):
-            cls = getattr(types, cls_name, None)
-            if cls:
-                try:
-                    return cls(text=rich_text)
-                except Exception:
-                    pass
-
-    for cls_name in (
+        ])
+    classes_to_try.extend([
         "InputRichBlockBlockQuotation",
         "InputRichBlockBlockquote",
-    ):
+    ])
+
+    for cls_name in classes_to_try:
         cls = getattr(types, cls_name, None)
         if cls:
             try:
@@ -210,7 +203,6 @@ def html_to_rich_blocks(caption_html):
         return []
 
     blocks = []
-    # Match blockquote open & close with optional attributes
     bq_pattern = re.compile(
         r"<(blockquote(?:\s+[^>]*)?)>(.*?)</blockquote[^>]*>",
         re.DOTALL | re.IGNORECASE,
@@ -536,7 +528,7 @@ async def send_now_playing_rich(
 
 
 def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
-    # Queue card without thumbnail as requested
+    # Pure clean text queue card without photo
     blocks = html_to_rich_blocks(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
@@ -572,7 +564,7 @@ async def send_queue_rich(
     client, chat_id, target_chat_id, caption_html, qid, photo=None, replace=None
 ):
     _ = await _lang(chat_id)
-    # Ignored photo intentionally for pure clean queue card
+    # Queue ke liye photo bypass
     blocks = build_queue_blocks(_, caption_html, chat_id, qid, photo=None)
     return await _deliver(client, target_chat_id, blocks, replace)
 
