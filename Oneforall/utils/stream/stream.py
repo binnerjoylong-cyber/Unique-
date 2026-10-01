@@ -38,7 +38,7 @@ async def _fetch(_, chat_id, vidid, mystic, video):
     return file_path, direct
 
 
-async def _announce_queue(_, chat_id, original_chat_id, mystic, title, duration_min, user_name):
+async def _announce_queue(_, chat_id, original_chat_id, mystic, title, duration_min, user_name, photo=None):
     position = len(db.get(chat_id)) - 1
     qid = uuid4().hex[:8]
     db[chat_id][-1]["qid"] = qid
@@ -49,6 +49,7 @@ async def _announce_queue(_, chat_id, original_chat_id, mystic, title, duration_
         original_chat_id,
         caption,
         qid,
+        photo=photo,
         replace=mystic,
     )
     return position
@@ -178,7 +179,6 @@ async def _stream(
 
                     thumb_task = asyncio.ensure_future(get_thumb(vidid))
                     try:
-                        # CRITICAL FIX: Jab video mode ho, tab image=None pass karo taaki VC video stream switch kare
                         await Hotty.join_call(
                             chat_id,
                             original_chat_id,
@@ -246,7 +246,7 @@ async def _stream(
 
         caption = (
             "<blockquote><emoji id=5895705279416241926>📑</emoji> <u><b>PLAYLIST STREAM STARTED</b></u></blockquote>\n\n"
-            "<blockquote expandable>"
+            "<blockquote>"
             f"👤 <b>Playlist Owner:</b> {user_name}\n"
             f"📊 <b>Total Queued:</b> <code>{added_count} tracks</code>\n"
             f"🎬 <b>Mode:</b> <code>{'Video' if is_video_mode else 'Audio'}</code></blockquote>"
@@ -278,11 +278,7 @@ async def _stream(
         duration_min = result["duration_min"]
         thumbnail = result["thumb"]
         status = True if is_video_mode else None
-        thumb_task = (
-            None
-            if await is_active_chat(chat_id)
-            else asyncio.ensure_future(get_thumb(vidid))
-        )
+        
         file_path, direct = await _fetch(_, chat_id, vidid, mystic, is_video_mode)
         if await is_active_chat(chat_id):
             await put_queue(
@@ -296,8 +292,9 @@ async def _stream(
                 user_id,
                 "video" if is_video_mode else "audio",
             )
+            img = thumbnail or await get_thumb(vidid)
             await _announce_queue(
-                _, chat_id, original_chat_id, mystic, title, duration_min, user_name
+                _, chat_id, original_chat_id, mystic, title, duration_min, user_name, photo=img
             )
         else:
             if not forceplay:
@@ -326,7 +323,7 @@ async def _stream(
                 "video" if is_video_mode else "audio",
                 forceplay=forceplay,
             )
-            img = await (thumb_task if thumb_task else get_thumb(vidid))
+            img = thumbnail or await get_thumb(vidid)
             caption = _["stream_1"].format(
                 f"https://t.me/{app.username}?start=info_{vidid}",
                 title[:23],
@@ -361,7 +358,7 @@ async def _stream(
                 "audio",
             )
             await _announce_queue(
-                _, chat_id, original_chat_id, mystic, title, duration_min, user_name
+                _, chat_id, original_chat_id, mystic, title, duration_min, user_name, photo=config.SOUNCLOUD_IMG_URL
             )
         else:
             if not forceplay:
@@ -400,6 +397,7 @@ async def _stream(
         title = (result["title"]).title()
         duration_min = result["dur"]
         status = True if is_video_mode else None
+        thumb = config.TELEGRAM_VIDEO_URL if is_video_mode else config.TELEGRAM_AUDIO_URL
         if await is_active_chat(chat_id):
             await put_queue(
                 chat_id,
@@ -413,7 +411,7 @@ async def _stream(
                 "video" if is_video_mode else "audio",
             )
             await _announce_queue(
-                _, chat_id, original_chat_id, mystic, title, duration_min, user_name
+                _, chat_id, original_chat_id, mystic, title, duration_min, user_name, photo=thumb
             )
         else:
             if not forceplay:
@@ -436,7 +434,6 @@ async def _stream(
                 "video" if is_video_mode else "audio",
                 forceplay=forceplay,
             )
-            thumb = config.TELEGRAM_VIDEO_URL if is_video_mode else config.TELEGRAM_AUDIO_URL
             caption = _["stream_1"].format(link, title[:23], duration_min, user_name)
             run = await send_now_playing_rich(
                 app,
@@ -468,8 +465,9 @@ async def _stream(
                 user_id,
                 "video" if is_video_mode else "audio",
             )
+            img = thumbnail or await get_thumb(vidid)
             await _announce_queue(
-                _, chat_id, original_chat_id, mystic, title, duration_min, user_name
+                _, chat_id, original_chat_id, mystic, title, duration_min, user_name, photo=img
             )
         else:
             if not forceplay:
@@ -501,7 +499,7 @@ async def _stream(
                 "video" if is_video_mode else "audio",
                 forceplay=forceplay,
             )
-            img = await get_thumb(vidid)
+            img = thumbnail or await get_thumb(vidid)
             caption = _["stream_1"].format(
                 f"https://t.me/{app.username}?start=info_{vidid}",
                 title[:23],
@@ -535,7 +533,7 @@ async def _stream(
                 "video" if is_video_mode else "audio",
             )
             await _announce_queue(
-                _, chat_id, original_chat_id, mystic, title, duration_min, user_name
+                _, chat_id, original_chat_id, mystic, title, duration_min, user_name, photo=config.STREAM_IMG_URL
             )
         else:
             if not forceplay:
