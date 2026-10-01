@@ -528,7 +528,7 @@ async def send_now_playing_rich(
 
 
 def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
-    # Pure clean text queue card without photo
+    # Pure clean card without photo
     blocks = html_to_rich_blocks(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
@@ -564,7 +564,6 @@ async def send_queue_rich(
     client, chat_id, target_chat_id, caption_html, qid, photo=None, replace=None
 ):
     _ = await _lang(chat_id)
-    # Queue ke liye photo bypass
     blocks = build_queue_blocks(_, caption_html, chat_id, qid, photo=None)
     return await _deliver(client, target_chat_id, blocks, replace)
 
