@@ -85,7 +85,14 @@ def _to_rich_text(items):
     if len(clean) == 1:
         return clean[0]
 
-    return clean
+    has_rich_obj = any(not isinstance(x, str) for x in clean)
+    if has_rich_obj and hasattr(types, "RichTextConcat"):
+        try:
+            return types.RichTextConcat(texts=clean)
+        except Exception:
+            pass
+
+    return "".join(str(x) for x in clean) if not has_rich_obj else clean
 
 
 def _parse_inline(segment):
@@ -108,7 +115,7 @@ def _parse_inline(segment):
 
         closing = m.group(1)
         tag = m.group(2).lower()
-        val = m.group(4) or ""
+        val = (m.group(4) or "").strip("\"' ")
 
         if tag == "strong":
             tag = "b"
