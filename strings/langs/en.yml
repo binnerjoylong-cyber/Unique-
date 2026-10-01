@@ -245,20 +245,21 @@ str_3 : "ғᴀɪʟᴇᴅ ᴛᴏ sᴛʀᴇᴀᴍ ʏᴏᴜᴛᴜʙᴇ ʟɪᴠᴇ s
 ping_1 : "{0} ɪs ᴘɪɴɢɪɴɢ..."
 ping_2: "<blockquote expandable>🏓 <b>ᴘσηɢ :</b> <code>{0} ᴍs</code>\n\n<b><u>💎 {1} ꜱʏꜱᴛєϻ ᴏᴠᴇʀᴠɪᴇᴡ</u></b>\n\n✨ <b>ᴜᴘᴛɪϻє</b> » {2}\n❄️ <b>ʀᴧϻ ᴜꜱᴧɢє</b> » {3}\n💫 <b>ᴄᴘᴜ ʟσᴧᴅ</b> » {4}\n🔮 <b>ᴅɪꜱᴋ ꜱᴛσʀᴧɢє</b> » {5}\n☁️ <b>ᴘʏ-ᴛɢᴄᴧʟʟꜱ ʟᴧᴛєηᴄʏ</b> » <code>{6} ᴍs</code>\n\n<b>🚀 ꜱᴛᴧᴛᴜꜱ :</b> ᴏᴘᴛɪϻɪᴢᴇᴅ & ʀᴜηηɪηɢ ꜱϻσσᴛʜʟʏ\n\n<b>⊚ ᴘσᴡєʀєᴅ ʙʏ ➜ <a href=\"https://t.me/dark_musictm\">˹ | •ɢx ɪɴꜰɪηɪᴛʏ ˼</a></b></blockquote>"
 
-queue_1 : "» ғᴇᴛᴄʜɪɴɢ ǫᴜᴇᴜᴇ...\n\nᴘʟᴇᴀsᴇ ᴡᴀɪᴛ..."
+Queue_1 : "» ғᴇᴛᴄʜɪɴɢ ǫᴜᴇᴜᴇ...\n\nᴘʟᴇᴀsᴇ ᴡᴀɪᴛ..."
 queue_2 : "» ǫᴜᴇᴜᴇ ᴇᴍᴘᴛʏ."
-queue_3 : "<u>» ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴄʜᴇᴄᴋ ᴛʜᴇ ʟɪsᴛ ᴏғ ᴛʜᴇ ǫᴜᴇᴜᴇᴅ ᴛʀᴀᴄᴋs :</u> <a href={0}>ʜᴇʀᴇ</a>"
-queue_4 : "<blockquote expandable>⁠<b>❖ ᴍᴜsɪᴄ ση ǫᴜᴇᴜᴇ Aᴛ #{0}⏤͟͞●\n\n<emoji id=6066395745139824604>🎀</emoji> Tɪᴛʟᴇ :</b> {1}\n<b><emoji id=5971944878815317190>💫</emoji> ʟᴇɴɢᴛʜ :</b> {2} ᴍɪɴᴜᴛᴇs\n<b><emoji id=6001449118000487326>🦋</emoji> ʀᴇǫᴜᴇsᴛᴇʀ :</b> {3}\n\n<b>⊚ ᴄʀᴇᴀᴛᴇᴅ ʙʏ ➜<a href=\"https://t.me/dark_musictm\">˹ | •ɢx ɪɴғɪɴɪᴛʏ ˼</a></b></blockquote expandable>"
+queue_3 : "<u>» ᴄʟɪᴄᴋ ʜᴇʀᴇ ᴛᴏ ᴄʜᴇᴄᴋ ᴛʜᴇ ʟɪsᴛ ᴏғ ᴛʜᴇ ǫᴜᴇᴜᴇᴅ ᴛʀᴀᴄᴋs :</u> <a href=\"{0}\">ʜᴇʀᴇ</a>"
+queue_4 : "<blockquote expandable><b>❖ ᴍᴜsɪᴄ ση ǫᴜᴇᴜᴇ Aᴛ #{0}⏤͟͞●</b>\n\n<emoji id=6066395745139824604>🎀</emoji> <b>Tɪᴛʟᴇ :</b> {1}\n<emoji id=5971944878815317190>💫</emoji> <b>ʟᴇɴɢᴛʜ :</b> {2} ᴍɪɴᴜᴛᴇs\n<emoji id=6001449118000487326>🦋</emoji> <b>ʀᴇǫᴜᴇsᴛᴇʀ :</b> {3}\n\n<b>⊚ ᴄʀᴇᴀᴛᴇᴅ ʙʏ ➜ <a href=\"https://t.me/dark_musictm\">˹ | •ɢx ɪɴғɪɴɪᴛʏ ˼</a></b></blockquote>"
 queue_5 : "ᴛʜᴇʀᴇ's ᴏɴʟʏ ᴏɴᴇ ǫᴜᴇᴜᴇᴅ ᴛʀᴀᴄᴋ ɪɴ ᴘʟᴀʏʟɪsᴛ.\n\nᴀᴅᴅ ᴍᴏʀᴇ ᴛʀᴀᴄᴋs ᴛᴏ ᴄʜᴇᴄᴋ ʟɪsᴛ."
 queue_6 : "<b>🕚 ᴅᴜʀᴀᴛɪᴏɴ :</b> ᴜɴᴋɴᴏᴡɴ ᴅᴜʀᴀᴛɪᴏɴ sᴛʀᴇᴀᴍ\n\nᴄʟɪᴄᴋ ᴏɴ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ɢᴇᴛ ᴡʜᴏʟᴇ ǫᴜᴇᴜᴇᴅ ʟɪsᴛ."
 queue_7 : "\nᴄʟɪᴄᴋ ᴏɴ ʙᴜᴛᴛᴏɴ ʙᴇʟᴏᴡ ᴛᴏ ɢᴇᴛ ᴡʜᴏʟᴇ ǫᴜᴇᴜᴇᴅ ʟɪsᴛ."
 queue_8 : "<b>{0} ᴘʟᴀʏᴇʀ</b>\n\n🎄 <b>sᴛʀᴇᴀᴍɪɴɢ :</b> {1}\n\n🔗 <b>sᴛʀᴇᴀᴍ ᴛʏᴘᴇ :</b> {2}\n🥀 <b>ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ :</b> {3}\n{4}"
 
-stream_1 : "<blockquote><emoji id=5895705279416241926>▶️</emoji> <b><u>ɪɴꜰɪɴɪᴛʏ sᴛᴀʀᴛᴇᴅ sᴛʀᴇᴀᴍɪɴɢ<emoji id=5938473438468378529>🎶</emoji></u></b></blockquote>\n\n<blockquote expandable><emoji id=6066395745139824604>🎀</emoji><b>ᴛɪᴛʟᴇ :</b> <a href=\"{0}\">{1}</a>\n <b><emoji id=5974235702701853774>🔶</emoji>ᴅᴜʀᴀᴛɪᴏɴ :</b> {2} ᴍɪɴᴜᴛᴇs\n<emoji id=5409132617750555920>🫂</emoji> <b>ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ :</b> {3}</blockquote expandable>"
+stream_1 : "<blockquote><emoji id=5895705279416241926>▶️</emoji> <b><u>ɪɴꜰɪɴɪᴛʏ sᴛᴀʀᴛᴇᴅ sᴛʀᴇᴀᴍɪɴɢ<emoji id=5938473438468378529>🎶</emoji></u></b></blockquote>\n\n<blockquote expandable><emoji id=6066395745139824604>🎀</emoji> <b>ᴛɪᴛʟᴇ :</b> <a href=\"{0}\">{1}</a>\n<emoji id=5974235702701853774>🔶</emoji> <b>ᴅᴜʀᴀᴛɪᴏɴ :</b> {2} ᴍɪɴᴜᴛᴇs\n<emoji id=5409132617750555920>🫂</emoji> <b>ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ :</b> {3}</blockquote>"
 
 stream_2 : "➲ <b>ɪɴꜰɪɴɪᴛʏ sᴛᴀʀᴛᴇᴅ sᴛʀᴇᴀᴍɪɴɢ</b>\n\n<blockquote>📡 <b>sᴛʀᴇᴀᴍ ᴛʏᴘᴇ :</b> ʟɪᴠᴇ sᴛʀᴇᴀᴍ [ᴜʀʟ]\n👤 <b>ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ :</b> {0}</blockquote>"
 
-stream_3 : "<blockquote>✨ ᴍᴀᴅᴇ ʙʏ ➠ <a href=\"https://t.me/Roohi_soul\">ɪɴꜰɪɴɪᴛʏ</a></blockquote>"
+stream_3 : "<blockquote>✨ ᴍᴀᴅᴇ ʙʏ ➠ <a href=\"https://t.me/Roohi_Soul\">ɪɴꜰɪɴɪᴛʏ</a></blockquote>"
+
 # General (Stylish Buttons)
 
 RICH_BTN_REPLAY : "↺ Replay"
