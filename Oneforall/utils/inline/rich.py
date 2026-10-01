@@ -83,28 +83,28 @@ def _make_custom_emoji(text, eid):
         try:
             return types.RichTextCustomEmoji(
                 custom_emoji_id=emoji_str_id,
-                alternative_text=alt_text
+                alternative_text=alt_text,
             )
         except Exception:
             pass
         try:
             return types.RichTextCustomEmoji(
                 custom_emoji_id=emoji_str_id,
-                text=alt_text
+                text=alt_text,
             )
         except Exception:
             pass
         try:
             return types.RichTextCustomEmoji(
                 custom_emoji_id=emoji_int_id,
-                alternative_text=alt_text
+                alternative_text=alt_text,
             )
         except Exception:
             pass
         try:
             return types.RichTextCustomEmoji(
                 document_id=emoji_int_id,
-                text=alt_text
+                text=alt_text,
             )
         except Exception:
             pass
@@ -529,8 +529,14 @@ async def send_now_playing_rich(
     return msg
 
 
-def build_queue_blocks(_, caption_html, chat_id, qid):
-    blocks = html_to_rich_blocks(caption_html)
+def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
+    blocks = []
+    if photo:
+        p_block = _format_photo_block(photo)
+        if p_block:
+            blocks.append(p_block)
+
+    blocks += html_to_rich_blocks(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
             buttons=[
@@ -562,10 +568,12 @@ def build_queue_blocks(_, caption_html, chat_id, qid):
 
 
 async def send_queue_rich(
-    client, chat_id, target_chat_id, caption_html, qid, replace=None
+    client, chat_id, target_chat_id, caption_html, qid, photo=None, replace=None
 ):
     _ = await _lang(chat_id)
-    blocks = build_queue_blocks(_, caption_html, chat_id, qid)
+    local_photo = await _download_photo_if_url(photo) if photo else None
+    resolved_photo = local_photo or photo
+    blocks = build_queue_blocks(_, caption_html, chat_id, qid, photo=resolved_photo)
     return await _deliver(client, target_chat_id, blocks, replace)
 
 
