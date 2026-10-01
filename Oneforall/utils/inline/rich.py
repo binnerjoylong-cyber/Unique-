@@ -139,9 +139,9 @@ async def _download_photo_if_url(photo):
 
 
 def _clean_caption_html(caption_html: str) -> str:
-    # Ensure standard HTML tags like <emoji id=...> and </blockquote expandable> get corrected
+    # Ensure closing tags are strictly valid Telegram HTML
     fixed = re.sub(r"</blockquote[^>]*>", "</blockquote>", caption_html, flags=re.IGNORECASE)
-    # Convert <tg-emoji id=...> to standard <emoji id=...> supported natively
+    # Ensure custom emoji tags are supported across forks
     fixed = re.sub(r"<tg-emoji\s+id=([^>]+)>", r"<emoji id=\1>", fixed, flags=re.IGNORECASE)
     fixed = re.sub(r"</tg-emoji>", r"</emoji>", fixed, flags=re.IGNORECASE)
     return fixed
@@ -180,8 +180,7 @@ async def send_now_playing_rich(client, chat_id, target_chat_id, photo, caption_
                 reply_markup=reply_markup,
                 disable_web_page_preview=True,
             )
-    except Exception as e:
-        # Fallback without photo if sending media is forbidden
+    except Exception:
         msg = await client.send_message(
             chat_id=target_chat_id,
             text=clean_caption,
@@ -279,15 +278,67 @@ async def update_now_playing_markup(client, chat_id: int, playing: bool = True):
         pass
 
 
-# Backward compatibility helpers
+def rich_autoplay_mood_blocks(caption_html: str):
+    caption = _clean_caption_html(caption_html)
+    keyboard = [
+        [
+            InlineKeyboardButton("✨ Chill", callback_data="songconfig_mood:chill"),
+            InlineKeyboardButton("⚡ Party", callback_data="songconfig_mood:party"),
+        ],
+        [
+            InlineKeyboardButton("💔 Sad", callback_data="songconfig_mood:sad"),
+            InlineKeyboardButton("💖 Romantic", callback_data="songconfig_mood:romantic"),
+        ],
+        [
+            InlineKeyboardButton("✖ Close", callback_data="close_panel")
+        ],
+    ]
+    return {"text": caption, "reply_markup": InlineKeyboardMarkup(keyboard)}
+
+
+def rich_autoplay_language_blocks(caption_html: str):
+    caption = _clean_caption_html(caption_html)
+    keyboard = [
+        [
+            InlineKeyboardButton("🇮🇳 Hindi", callback_data="songconfig_language:hindi"),
+            InlineKeyboardButton("🌐 English", callback_data="songconfig_language:english"),
+        ],
+        [
+            InlineKeyboardButton("🎸 Punjabi", callback_data="songconfig_language:punjabi"),
+            InlineKeyboardButton("💫 Haryanvi", callback_data="songconfig_language:haryanvi"),
+        ],
+        [
+            InlineKeyboardButton("✖ Close", callback_data="close_panel")
+        ],
+    ]
+    return {"text": caption, "reply_markup": InlineKeyboardMarkup(keyboard)}
+
+
+# Compatibility wrappers
 def caption_blocks(caption_html):
     return caption_html
+
 
 def html_to_rich_blocks(caption_html):
     return []
 
+
 async def edit_rich(message, blocks):
+    if isinstance(blocks, dict):
+        return await message.edit_text(
+            text=blocks.get("text", ""),
+            reply_markup=blocks.get("reply_markup"),
+            parse_mode=enums.ParseMode.HTML,
+        )
     return message
 
+
 async def deliver_rich(client, target_chat_id, blocks, replace=None):
+    if isinstance(blocks, dict):
+        return await client.send_message(
+            chat_id=target_chat_id,
+            text=blocks.get("text", ""),
+            reply_markup=blocks.get("reply_markup"),
+            parse_mode=enums.ParseMode.HTML,
+        )
     return None
