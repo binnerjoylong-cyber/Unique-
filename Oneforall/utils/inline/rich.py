@@ -60,6 +60,7 @@ def _make_custom_emoji(text, eid):
     digits = re.sub(r"\D", "", str(eid))
     if not digits:
         return _wrap_plain(text or "✨")
+    doc_id = int(digits)
 
     if isinstance(text, list):
         flat_strs = []
@@ -71,45 +72,35 @@ def _make_custom_emoji(text, eid):
                 flat_strs.append(str(inner_t) if not hasattr(inner_t, "text") else str(getattr(inner_t, "text", "")))
             else:
                 flat_strs.append(str(x))
-        alt_text = "".join(flat_strs) or "✨"
+        raw_char = "".join(flat_strs) or "✨"
     else:
-        alt_text = str(text) if text else "✨"
+        raw_char = str(text) if text else "✨"
 
-    alt_text = str(alt_text).strip() or "✨"
-    emoji_str_id = str(digits)
-    emoji_int_id = int(digits)
+    raw_char = str(raw_char).strip() or "✨"
 
     if hasattr(types, "RichTextCustomEmoji"):
+        # 1. Primary: document_id (int) + text (str)
         try:
-            return types.RichTextCustomEmoji(
-                custom_emoji_id=emoji_str_id,
-                alternative_text=alt_text,
-            )
+            return types.RichTextCustomEmoji(document_id=doc_id, text=raw_char)
         except Exception:
             pass
+        # 2. Secondary: document_id (int) + alternative_text (str)
         try:
-            return types.RichTextCustomEmoji(
-                custom_emoji_id=emoji_str_id,
-                text=alt_text,
-            )
+            return types.RichTextCustomEmoji(document_id=doc_id, alternative_text=raw_char)
         except Exception:
             pass
+        # 3. custom_emoji_id (int) + text (str)
         try:
-            return types.RichTextCustomEmoji(
-                custom_emoji_id=emoji_int_id,
-                alternative_text=alt_text,
-            )
+            return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=raw_char)
         except Exception:
             pass
+        # 4. custom_emoji_id (str) + alternative_text (str)
         try:
-            return types.RichTextCustomEmoji(
-                document_id=emoji_int_id,
-                text=alt_text,
-            )
+            return types.RichTextCustomEmoji(custom_emoji_id=str(doc_id), alternative_text=raw_char)
         except Exception:
             pass
 
-    return _wrap_plain(alt_text)
+    return _wrap_plain(raw_char)
 
 
 def _parse_inline(segment):
