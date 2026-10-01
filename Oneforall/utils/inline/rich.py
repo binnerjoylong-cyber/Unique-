@@ -60,7 +60,6 @@ def _make_custom_emoji(text, eid):
     digits = re.sub(r"\D", "", str(eid))
     if not digits:
         return _wrap_plain(text or "✨")
-    doc_id = int(digits)
 
     if isinstance(text, list):
         flat_strs = []
@@ -77,30 +76,32 @@ def _make_custom_emoji(text, eid):
         raw_char = str(text) if text else "✨"
 
     raw_char = str(raw_char).strip() or "✨"
+    doc_id = int(digits)
+    plain_item = _wrap_plain(raw_char)
 
     if hasattr(types, "RichTextCustomEmoji"):
-        # 1. Primary: document_id (int) + text (str)
+        # Pyrofork variant 1: document_id (int) + text (RichText)
+        try:
+            return types.RichTextCustomEmoji(document_id=doc_id, text=plain_item)
+        except Exception:
+            pass
+        # Pyrofork variant 2: custom_emoji_id (int) + text (RichText)
+        try:
+            return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=plain_item)
+        except Exception:
+            pass
+        # Pyrofork variant 3: document_id (int) + text (str)
         try:
             return types.RichTextCustomEmoji(document_id=doc_id, text=raw_char)
         except Exception:
             pass
-        # 2. Secondary: document_id (int) + alternative_text (str)
-        try:
-            return types.RichTextCustomEmoji(document_id=doc_id, alternative_text=raw_char)
-        except Exception:
-            pass
-        # 3. custom_emoji_id (int) + text (str)
+        # Pyrofork variant 4: custom_emoji_id (int) + text (str)
         try:
             return types.RichTextCustomEmoji(custom_emoji_id=doc_id, text=raw_char)
         except Exception:
             pass
-        # 4. custom_emoji_id (str) + alternative_text (str)
-        try:
-            return types.RichTextCustomEmoji(custom_emoji_id=str(doc_id), alternative_text=raw_char)
-        except Exception:
-            pass
 
-    return _wrap_plain(raw_char)
+    return plain_item
 
 
 def _parse_inline(segment):
@@ -163,16 +164,29 @@ def _parse_inline(segment):
 
 def _make_blockquote(items, is_expandable=False):
     rich_text = _to_rich_text(items)
-    if is_expandable and hasattr(types, "InputRichBlockExpandableBlockQuotation"):
-        try:
-            return types.InputRichBlockExpandableBlockQuotation(text=rich_text)
-        except Exception:
-            pass
-    if hasattr(types, "InputRichBlockBlockQuotation"):
-        try:
-            return types.InputRichBlockBlockQuotation(text=rich_text)
-        except Exception:
-            pass
+    if is_expandable:
+        for cls_name in (
+            "InputRichBlockExpandableBlockQuotation",
+            "InputRichBlockExpandableBlockquote",
+        ):
+            cls = getattr(types, cls_name, None)
+            if cls:
+                try:
+                    return cls(text=rich_text)
+                except Exception:
+                    pass
+
+    for cls_name in (
+        "InputRichBlockBlockQuotation",
+        "InputRichBlockBlockquote",
+    ):
+        cls = getattr(types, cls_name, None)
+        if cls:
+            try:
+                return cls(text=rich_text)
+            except Exception:
+                pass
+
     if hasattr(types, "InputRichBlockParagraph"):
         try:
             return types.InputRichBlockParagraph(text=rich_text)
@@ -196,6 +210,7 @@ def html_to_rich_blocks(caption_html):
         return []
 
     blocks = []
+    # Match blockquote open & close with optional attributes
     bq_pattern = re.compile(
         r"<(blockquote(?:\s+[^>]*)?)>(.*?)</blockquote[^>]*>",
         re.DOTALL | re.IGNORECASE,
@@ -521,13 +536,8 @@ async def send_now_playing_rich(
 
 
 def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
-    blocks = []
-    if photo:
-        p_block = _format_photo_block(photo)
-        if p_block:
-            blocks.append(p_block)
-
-    blocks += html_to_rich_blocks(caption_html)
+    # Queue card without thumbnail as requested
+    blocks = html_to_rich_blocks(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
             buttons=[
@@ -562,9 +572,8 @@ async def send_queue_rich(
     client, chat_id, target_chat_id, caption_html, qid, photo=None, replace=None
 ):
     _ = await _lang(chat_id)
-    local_photo = await _download_photo_if_url(photo) if photo else None
-    resolved_photo = local_photo or photo
-    blocks = build_queue_blocks(_, caption_html, chat_id, qid, photo=resolved_photo)
+    # Ignored photo intentionally for pure clean queue card
+    blocks = build_queue_blocks(_, caption_html, chat_id, qid, photo=None)
     return await _deliver(client, target_chat_id, blocks, replace)
 
 
