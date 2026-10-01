@@ -158,28 +158,18 @@ def _parse_inline(segment):
     return _to_rich_text(parts)
 
 
-def _make_blockquote(items, is_expandable=False):
+def _make_blockquote(items):
     rich_text = _to_rich_text(items)
-
-    classes_to_try = []
-    if is_expandable:
-        classes_to_try.extend([
-            "InputRichBlockExpandableBlockQuotation",
-            "InputRichBlockExpandableBlockquote",
-        ])
-    classes_to_try.extend([
+    for cls_name in (
         "InputRichBlockBlockQuotation",
         "InputRichBlockBlockquote",
-    ])
-
-    for cls_name in classes_to_try:
+    ):
         cls = getattr(types, cls_name, None)
         if cls:
             try:
                 return cls(text=rich_text)
             except Exception:
                 pass
-
     if hasattr(types, "InputRichBlockParagraph"):
         try:
             return types.InputRichBlockParagraph(text=rich_text)
@@ -222,9 +212,7 @@ def html_to_rich_blocks(caption_html):
                         if blk:
                             blocks.append(blk)
 
-        open_tag = match.group(1).lower()
         inner_content = match.group(2).strip()
-        is_expandable = "expandable" in open_tag
 
         inner_items = []
         for line in inner_content.split("\n"):
@@ -241,7 +229,7 @@ def html_to_rich_blocks(caption_html):
         if inner_items and inner_items[-1] == "\n":
             inner_items.pop()
 
-        blk = _make_blockquote(inner_items, is_expandable=is_expandable)
+        blk = _make_blockquote(inner_items)
         if blk:
             blocks.append(blk)
 
@@ -528,7 +516,6 @@ async def send_now_playing_rich(
 
 
 def build_queue_blocks(_, caption_html, chat_id, qid, photo=None):
-    # Pure clean card without photo
     blocks = html_to_rich_blocks(caption_html)
     blocks.append(
         types.InputRichBlockButtons(
